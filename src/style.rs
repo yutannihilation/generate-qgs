@@ -96,6 +96,9 @@ pub enum VectorStyle {
     /// Features are colored by an attribute value along a color gradient
     /// (like `samples/red.qgs`).
     Graduated(GraduatedStyle),
+    /// Each discrete attribute value gets its own color (like
+    /// `samples/categorized.qgs`).
+    Categorized(CategorizedStyle),
 }
 
 /// Style for [`VectorStyle::SingleSymbol`].
@@ -133,12 +136,56 @@ pub struct GraduatedStyle {
     pub outline_width: f64,
 }
 
+/// Style for [`VectorStyle::Categorized`].
+///
+/// Only the color (and the shared outline) of each category symbol is
+/// customized; all other symbol attributes use QGIS's default values.
+#[derive(Debug, Clone)]
+pub struct CategorizedStyle {
+    /// Attribute (field) name to classify on.
+    pub attribute: String,
+    /// `(value, color)` pairs, in legend order. Values are matched as
+    /// strings (`type="string"`).
+    pub categories: Vec<(String, Rgb)>,
+    /// Optional catch-all category ("all other values"), rendered as
+    /// `<category type="NULL" value="NULL"/>`.
+    pub catch_all: Option<Rgb>,
+    pub outline_color: Rgb,
+    /// Stroke width in millimeters.
+    pub outline_width: f64,
+}
+
 impl VectorStyle {
     /// Single symbol with the given fill color, dark gray 0.26 mm outline
     /// (QGIS defaults).
     pub fn single(color: Rgb) -> Self {
         VectorStyle::SingleSymbol(SimpleStyle {
             color,
+            outline_color: Rgb::new(35, 35, 35),
+            outline_width: 0.26,
+        })
+    }
+
+    /// Discrete coloring of `attribute`: each `(value, color)` pair becomes
+    /// one `<category>` linked to one `<symbol>`. `catch_all`, if given, is
+    /// the color of the trailing "all other values" (`value="NULL"`)
+    /// category.
+    pub fn categorized(
+        attribute: impl Into<String>,
+        categories: &[(impl AsRef<str>, Rgb)],
+        catch_all: Option<Rgb>,
+    ) -> Self {
+        assert!(
+            !categories.is_empty(),
+            "categorized style needs at least 1 category"
+        );
+        VectorStyle::Categorized(CategorizedStyle {
+            attribute: attribute.into(),
+            categories: categories
+                .iter()
+                .map(|(value, color)| (value.as_ref().to_string(), *color))
+                .collect(),
+            catch_all,
             outline_color: Rgb::new(35, 35, 35),
             outline_width: 0.26,
         })
@@ -364,6 +411,43 @@ fn write_symbol(
     w.end(); // symbol
 }
 
+/// Writes the `<colorramp name="[source]" type="gradient">` element for the
+/// `[start, end]` endpoints plus optional intermediate `stops`.
+fn write_gradient_colorramp(w: &mut XmlWriter, start: Rgb, end: Rgb, stops: &[(f64, Rgb)]) {
+    w.start("colorramp")
+        .attr("name", "[source]")
+        .attr("type", "gradient");
+    w.start("Option").attr("type", "Map");
+    for (name, value) in [
+        ("color1", start.qgis()),
+        ("color2", end.qgis()),
+        ("direction", "ccw".to_string()),
+        ("discrete", "0".to_string()),
+        ("rampType", "gradient".to_string()),
+        ("spec", "rgb".to_string()),
+    ] {
+        w.empty(
+            "Option",
+            &[("name", name), ("type", "QString"), ("value", &value)],
+        );
+    }
+    // Intermediate control points, if any:
+    // `offset;color;rgb;ccw:offset;color;rgb;ccw:...`
+    if !stops.is_empty() {
+        let stops = stops
+            .iter()
+            .map(|(offset, color)| format!("{};{};rgb;ccw", g6(*offset), color.qgis()))
+            .collect::<Vec<_>>()
+            .join(":");
+        w.empty(
+            "Option",
+            &[("name", "stops"), ("type", "QString"), ("value", &stops)],
+        );
+    }
+    w.end(); // Option
+    w.end(); // colorramp
+}
+
 /// Label for a graduated range, following the
 /// `<labelFormat format="%1 - %2" labelprecision="1" trimtrailingzeroes="1"/>`
 /// convention (e.g. `0 - 10`, `9.5 - 19`).
@@ -441,38 +525,12 @@ pub(crate) fn write_renderer(w: &mut XmlWriter, geom: GeometryType, style: &Vect
                 g.outline_width,
             );
             w.end(); // source-symbol
-            w.start("colorramp")
-                .attr("name", "[source]")
-                .attr("type", "gradient");
-            w.start("Option").attr("type", "Map");
-            for (name, value) in [
-                ("color1", g.color_stops[0].1.qgis()),
-                ("color2", g.color_stops[g.color_stops.len() - 1].1.qgis()),
-                ("direction", "ccw".to_string()),
-                ("discrete", "0".to_string()),
-                ("rampType", "gradient".to_string()),
-                ("spec", "rgb".to_string()),
-            ] {
-                w.empty(
-                    "Option",
-                    &[("name", name), ("type", "QString"), ("value", &value)],
-                );
-            }
-            // Intermediate control points, if any:
-            // `offset;color;rgb;ccw:offset;color;rgb;ccw:...`
-            if g.color_stops.len() > 2 {
-                let stops = g.color_stops[1..g.color_stops.len() - 1]
-                    .iter()
-                    .map(|(offset, color)| format!("{};{};rgb;ccw", g6(*offset), color.qgis()))
-                    .collect::<Vec<_>>()
-                    .join(":");
-                w.empty(
-                    "Option",
-                    &[("name", "stops"), ("type", "QString"), ("value", &stops)],
-                );
-            }
-            w.end(); // Option
-            w.end(); // colorramp
+            write_gradient_colorramp(
+                w,
+                g.color_stops[0].1,
+                g.color_stops[g.color_stops.len() - 1].1,
+                &g.color_stops[1..g.color_stops.len() - 1],
+            );
             w.start("classificationMethod").attr("id", "Pretty");
             w.empty(
                 "symmetricMode",
@@ -491,6 +549,78 @@ pub(crate) fn write_renderer(w: &mut XmlWriter, geom: GeometryType, style: &Vect
             w.end(); // parameters
             w.empty("extraInformation", &[]);
             w.end(); // classificationMethod
+            w.empty("rotation", &[]);
+            w.empty("sizescale", &[]);
+            write_data_defined_properties(w, "data-defined-properties");
+            w.end(); // renderer-v2
+        }
+        VectorStyle::Categorized(c) => {
+            w.start("renderer-v2")
+                .attr("attr", &c.attribute)
+                .attr("enableorderby", "0")
+                .attr("forceraster", "0")
+                .attr("referencescale", "-1")
+                .attr("symbollevels", "0")
+                .attr("type", "categorizedSymbol");
+            w.start("categories");
+            for (i, (value, _)) in c.categories.iter().enumerate() {
+                w.start("category")
+                    .attr("label", value)
+                    .attr("render", "true")
+                    .attr("symbol", i.to_string())
+                    .attr("type", "string")
+                    .attr("uuid", format!("{{{}}}", uuid()))
+                    .attr("value", value);
+                w.end();
+            }
+            if c.catch_all.is_some() {
+                w.start("category")
+                    .attr("label", "")
+                    .attr("render", "true")
+                    .attr("symbol", c.categories.len().to_string())
+                    .attr("type", "NULL")
+                    .attr("uuid", format!("{{{}}}", uuid()))
+                    .attr("value", "NULL");
+                w.end();
+            }
+            w.end(); // categories
+            w.start("symbols");
+            for (i, (_, color)) in c.categories.iter().enumerate() {
+                write_symbol(
+                    w,
+                    &i.to_string(),
+                    geom,
+                    *color,
+                    c.outline_color,
+                    c.outline_width,
+                );
+            }
+            if let Some(color) = c.catch_all {
+                write_symbol(
+                    w,
+                    &c.categories.len().to_string(),
+                    geom,
+                    color,
+                    c.outline_color,
+                    c.outline_width,
+                );
+            }
+            w.end(); // symbols
+            w.start("source-symbol");
+            write_symbol(
+                w,
+                "0",
+                geom,
+                c.categories[0].1,
+                c.outline_color,
+                c.outline_width,
+            );
+            w.end(); // source-symbol
+            // The colorramp is only informational for a categorized
+            // renderer (used when re-classifying); derive it from the
+            // first/last category color.
+            let last_color = c.catch_all.unwrap_or(c.categories[c.categories.len() - 1].1);
+            write_gradient_colorramp(w, c.categories[0].1, last_color, &[]);
             w.empty("rotation", &[]);
             w.empty("sizescale", &[]);
             write_data_defined_properties(w, "data-defined-properties");
@@ -580,5 +710,42 @@ mod tests {
     fn labels() {
         assert_eq!(range_label(0.0, 10.0), "0 - 10");
         assert_eq!(range_label(9.5, 19.0), "9.5 - 19");
+    }
+
+    #[test]
+    fn categorized_renderer_structure() {
+        let style = VectorStyle::categorized(
+            "NAME",
+            &[
+                ("Alamance", Rgb::new(255, 255, 255)),
+                ("Alexander", Rgb::new(255, 252, 252)),
+            ],
+            Some(Rgb::new(255, 0, 0)),
+        );
+        let mut w = XmlWriter::new(0);
+        write_renderer(&mut w, GeometryType::Polygon, &style);
+        let out = w.finish();
+
+        assert!(out.contains("type=\"categorizedSymbol\""));
+        assert!(out.contains("attr=\"NAME\""));
+        // Categories reference symbols by index...
+        assert!(out.contains(
+            "<category label=\"Alamance\" render=\"true\" symbol=\"0\" type=\"string\""
+        ));
+        assert!(out.contains("value=\"Alamance\""));
+        assert!(out.contains(
+            "<category label=\"Alexander\" render=\"true\" symbol=\"1\" type=\"string\""
+        ));
+        // ...and the catch-all is a NULL category with the next index.
+        assert!(out.contains(
+            "<category label=\"\" render=\"true\" symbol=\"2\" type=\"NULL\""
+        ));
+        assert!(out.contains("value=\"NULL\""));
+        // Symbols are named with the same ids, colors included.
+        assert!(out.contains("name=\"0\" type=\"fill\""));
+        assert!(out.contains("name=\"2\" type=\"fill\""));
+        assert!(out.contains("255,255,255,255,rgb:1,1,1,1"));
+        assert!(out.contains("255,252,252,255,rgb:1,0.9882353,0.9882353,1"));
+        assert!(out.contains("255,0,0,255,rgb:1,0,0,1"));
     }
 }

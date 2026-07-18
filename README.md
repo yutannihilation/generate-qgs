@@ -50,6 +50,20 @@ b.add_vector_layer(
     ),
 )?;
 
+// Or a discrete color per attribute value ("categorized" in QGIS), with an
+// optional catch-all color for all other values:
+b.add_vector_layer(
+    "../tmp/nc.gpkg",
+    "nc3",
+    4267,
+    GeometryType::Polygon,
+    VectorStyle::categorized(
+        "NAME",
+        &[("Alamance", Rgb::new(255, 255, 255)), ("Alexander", Rgb::new(255, 252, 252))],
+        Some(Rgb::new(255, 0, 0)),
+    ),
+)?;
+
 b.write_to("project.qgs")?;
 ```
 
@@ -60,6 +74,7 @@ b.write_to("project.qgs")?;
 - `out/load.qgs` — XYZ tile layer + single-color vector layer
 - `out/red.qgs` — XYZ tile layer + graduated-color vector layer (two-color ramp)
 - `out/magma.qgs` — XYZ tile layer + graduated-color vector layer (magma ramp with many color stops)
+- `out/categorized.qgs` — XYZ tile layer + categorized vector layer (discrete color per value)
 
 ## Sample .qgs files
 
@@ -67,3 +82,4 @@ b.write_to("project.qgs")?;
 - `load.qgs`: a QGIS project with two layers: XYZ tile and .gpkg (single color)
 - `red.qgs`: a QGIS project with two layers: XYZ tile and .gpkg (gradient based on attribute value)
 - `magma.qgs`: a QGIS project with two layers: XYZ tile and .gpkg (magma color ramp based on attribute value)
+- `categorized.qgs`: a QGIS project with two layers: XYZ tile and .gpkg (discrete color per attribute value)

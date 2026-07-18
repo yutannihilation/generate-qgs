@@ -94,6 +94,14 @@ id starts with `_`.
     `0..=1` (formatted with `%g`, 6 significant digits). Class colors are
     piecewise-linear interpolations between consecutive control points in
     RGB space, sampled at `i / (classes - 1)`.
+  - `type="categorizedSymbol"` (like `samples/categorized.qgs`) is the
+    discrete counterpart: `<categories>` maps attribute values to symbol
+    ids — `<category label="..." symbol="0" type="string" value="..."/>`
+    (the trailing "all other values" category is
+    `type="NULL" value="NULL"` with an empty label) — and `<symbols>`
+    holds one `<symbol name="0">`, `<symbol name="1">`, ... per category.
+    It also carries a `<source-symbol>` and an informational
+    `<colorramp>` (only used when re-classifying).
 - Field-related nodes (`<fieldConfiguration>`, `<aliases>`, `<defaults>`,
   `<constraints>`, ...) repeat per-column boilerplate. QGIS regenerates
   them from the data source on load, so a generator can omit them.
