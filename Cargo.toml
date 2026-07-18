@@ -1,0 +1,12 @@
+[package]
+name = "generate-qgs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+epsg-utils = { version = "0.0.3", default-features = false, features = [
+    "wkt2-definitions",
+] }
+
+[dev-dependencies]
+quick-xml = "0.41.0"
