@@ -42,7 +42,17 @@ fn full_project_is_well_formed() {
         "stations & stops",
         Srs::Wkt(epsg_utils::epsg_to_wkt2(4326).unwrap().to_string()),
         GeometryType::Point,
-        VectorStyle::graduated("value", 5, -3.5, 100.25, Rgb::new(255, 255, 255), Rgb::new(0, 0, 255)),
+        VectorStyle::graduated(
+            "value",
+            5,
+            -3.5,
+            100.25,
+            &[
+                (0.0, Rgb::new(255, 255, 255)),
+                (0.3, Rgb::new(255, 255, 0)),
+                (1.0, Rgb::new(0, 0, 255)),
+            ],
+        ),
     )
     .unwrap();
     b.add_vector_layer(

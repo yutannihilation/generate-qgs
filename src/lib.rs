@@ -190,7 +190,13 @@ mod tests {
             "nc",
             4267,
             GeometryType::Polygon,
-            VectorStyle::graduated("SID79", 6, 0.0, 57.0, Rgb::new(255, 255, 255), Rgb::new(255, 0, 0)),
+            VectorStyle::graduated(
+                "SID79",
+                6,
+                0.0,
+                57.0,
+                &[(0.0, Rgb::new(255, 255, 255)), (1.0, Rgb::new(255, 0, 0))],
+            ),
         )
         .unwrap();
         b

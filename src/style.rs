@@ -114,8 +114,9 @@ pub struct SimpleStyle {
 /// Style for [`VectorStyle::Graduated`].
 ///
 /// Ranges are equal-interval between `min` and `max` (a "quick and dirty"
-/// substitute for QGIS's "Pretty" classification); colors are interpolated
-/// from `ramp_start` to `ramp_end`.
+/// substitute for QGIS's "Pretty" classification); colors are sampled from
+/// `color_stops`, a gradient of control points `(offset, color)` with
+/// offsets in `0..=1` (like `samples/magma.qgs`).
 #[derive(Debug, Clone)]
 pub struct GraduatedStyle {
     /// Attribute (field) name to classify on.
@@ -124,8 +125,9 @@ pub struct GraduatedStyle {
     pub classes: usize,
     pub min: f64,
     pub max: f64,
-    pub ramp_start: Rgb,
-    pub ramp_end: Rgb,
+    /// Gradient control points `(offset, color)`, sorted by offset;
+    /// the first must be at `0.0` and the last at `1.0`.
+    pub color_stops: Vec<(f64, Rgb)>,
     pub outline_color: Rgb,
     /// Stroke width in millimeters.
     pub outline_width: f64,
@@ -143,25 +145,41 @@ impl VectorStyle {
     }
 
     /// Graduated coloring of `attribute` with `classes` equal-interval
-    /// ranges between `min` and `max`, colors interpolated from
-    /// `ramp_start` to `ramp_end`.
+    /// ranges between `min` and `max`. Class colors are interpolated along
+    /// `color_stops`, a list of `(offset, color)` control points with
+    /// offsets in `0..=1`: the first entry must be at `0.0`, the last at
+    /// `1.0`. A plain two-color ramp is `&[(0.0, from), (1.0, to)]`.
     pub fn graduated(
         attribute: impl Into<String>,
         classes: usize,
         min: f64,
         max: f64,
-        ramp_start: Rgb,
-        ramp_end: Rgb,
+        color_stops: &[(f64, Rgb)],
     ) -> Self {
         assert!(classes >= 2, "graduated style needs at least 2 classes");
         assert!(min < max, "graduated style needs min < max");
+        assert!(
+            color_stops.len() >= 2,
+            "graduated style needs at least 2 color stops"
+        );
+        assert!(
+            color_stops.first().unwrap().0 == 0.0,
+            "first color stop must be at offset 0.0"
+        );
+        assert!(
+            color_stops.last().unwrap().0 == 1.0,
+            "last color stop must be at offset 1.0"
+        );
+        assert!(
+            color_stops.windows(2).all(|w| w[0].0 < w[1].0),
+            "color stops must be in ascending offset order"
+        );
         VectorStyle::Graduated(GraduatedStyle {
             attribute: attribute.into(),
             classes,
             min,
             max,
-            ramp_start,
-            ramp_end,
+            color_stops: color_stops.to_vec(),
             outline_color: Rgb::new(35, 35, 35),
             outline_width: 0.26,
         })
@@ -185,6 +203,47 @@ fn write_data_defined_properties(w: &mut XmlWriter, tag: &str) {
 /// Formats a number the way QGIS writes widths (`0.26`, `1`, ...).
 fn num(v: f64) -> String {
     v.to_string()
+}
+
+/// Samples the color ramp at `t` (in `0..=1`) by piecewise linear
+/// interpolation in RGB space between consecutive control points.
+fn sample_ramp(stops: &[(f64, Rgb)], t: f64) -> Rgb {
+    if t <= stops[0].0 {
+        return stops[0].1;
+    }
+    if t >= stops[stops.len() - 1].0 {
+        return stops[stops.len() - 1].1;
+    }
+    let i = stops
+        .iter()
+        .position(|&(offset, _)| offset > t)
+        .expect("t is within the ramp");
+    let (o0, c0) = stops[i - 1];
+    let (o1, c1) = stops[i];
+    let f = (t - o0) / (o1 - o0);
+    c0.lerp(c1, f)
+}
+
+/// Formats a gradient stop offset like QGIS does (`%g` with 6 significant
+/// digits, e.g. `0.0196078`, `0.509804`, `0.5`, `1`).
+fn g6(v: f64) -> String {
+    if v == 0.0 {
+        return "0".to_string();
+    }
+    let exp = v.abs().log10().floor() as i32;
+    if !(-4..6).contains(&exp) {
+        // Scientific notation, as C's `%g` does (e.g. `1.23457e-05`).
+        let s = format!("{v:.5e}");
+        let (mantissa, exponent) = s.split_once('e').unwrap();
+        let mantissa = mantissa.trim_end_matches('0').trim_end_matches('.');
+        let e: i32 = exponent.parse().unwrap();
+        return format!("{}e{}{:02}", mantissa, if e < 0 { '-' } else { '+' }, e.abs());
+    }
+    let decimals = (5 - exp).max(0) as usize;
+    format!("{v:.decimals$}")
+        .trim_end_matches('0')
+        .trim_end_matches('.')
+        .to_string()
 }
 
 /// Options of the symbol layer (`<Option type="Map">` children), sorted by
@@ -361,7 +420,7 @@ pub(crate) fn write_renderer(w: &mut XmlWriter, geom: GeometryType, style: &Vect
             w.start("symbols");
             for i in 0..g.classes {
                 let t = i as f64 / (g.classes - 1) as f64;
-                let color = g.ramp_start.lerp(g.ramp_end, t);
+                let color = sample_ramp(&g.color_stops, t);
                 write_symbol(
                     w,
                     &i.to_string(),
@@ -373,15 +432,22 @@ pub(crate) fn write_renderer(w: &mut XmlWriter, geom: GeometryType, style: &Vect
             }
             w.end(); // symbols
             w.start("source-symbol");
-            write_symbol(w, "0", geom, g.ramp_start, g.outline_color, g.outline_width);
+            write_symbol(
+                w,
+                "0",
+                geom,
+                g.color_stops[0].1,
+                g.outline_color,
+                g.outline_width,
+            );
             w.end(); // source-symbol
             w.start("colorramp")
                 .attr("name", "[source]")
                 .attr("type", "gradient");
             w.start("Option").attr("type", "Map");
             for (name, value) in [
-                ("color1", g.ramp_start.qgis()),
-                ("color2", g.ramp_end.qgis()),
+                ("color1", g.color_stops[0].1.qgis()),
+                ("color2", g.color_stops[g.color_stops.len() - 1].1.qgis()),
                 ("direction", "ccw".to_string()),
                 ("discrete", "0".to_string()),
                 ("rampType", "gradient".to_string()),
@@ -390,6 +456,19 @@ pub(crate) fn write_renderer(w: &mut XmlWriter, geom: GeometryType, style: &Vect
                 w.empty(
                     "Option",
                     &[("name", name), ("type", "QString"), ("value", &value)],
+                );
+            }
+            // Intermediate control points, if any:
+            // `offset;color;rgb;ccw:offset;color;rgb;ccw:...`
+            if g.color_stops.len() > 2 {
+                let stops = g.color_stops[1..g.color_stops.len() - 1]
+                    .iter()
+                    .map(|(offset, color)| format!("{};{};rgb;ccw", g6(*offset), color.qgis()))
+                    .collect::<Vec<_>>()
+                    .join(":");
+                w.empty(
+                    "Option",
+                    &[("name", "stops"), ("type", "QString"), ("value", &stops)],
                 );
             }
             w.end(); // Option
@@ -444,8 +523,7 @@ mod tests {
     #[test]
     fn ramp_interpolation_matches_sample() {
         // samples/red.qgs: white -> red in 6 classes
-        let white = Rgb::new(255, 255, 255);
-        let red = Rgb::new(255, 0, 0);
+        let ramp = [(0.0, Rgb::new(255, 255, 255)), (1.0, Rgb::new(255, 0, 0))];
         let expected = [
             Rgb::new(255, 255, 255),
             Rgb::new(255, 204, 204),
@@ -455,8 +533,47 @@ mod tests {
             Rgb::new(255, 0, 0),
         ];
         for (i, want) in expected.iter().enumerate() {
-            assert_eq!(&white.lerp(red, i as f64 / 5.0), want);
+            assert_eq!(&sample_ramp(&ramp, i as f64 / 5.0), want);
         }
+    }
+
+    #[test]
+    fn multi_stop_interpolation_matches_sample() {
+        // Class colors in samples/magma.qgs (6 classes), and the magma
+        // control points adjacent to the class positions.
+        let ramp = [
+            (0.0, Rgb::new(0, 0, 4)),
+            (0.196078, Rgb::new(57, 15, 110)),
+            (0.215686, Rgb::new(66, 15, 117)),
+            (0.392157, Rgb::new(137, 40, 129)),
+            (0.411765, Rgb::new(145, 43, 129)),
+            (0.588235, Rgb::new(217, 70, 107)),
+            (0.607843, Rgb::new(224, 76, 103)),
+            (0.784314, Rgb::new(253, 152, 105)),
+            (0.803922, Rgb::new(254, 161, 110)),
+            (1.0, Rgb::new(252, 253, 191)),
+        ];
+        let expected = [
+            Rgb::new(0, 0, 4),
+            Rgb::new(59, 15, 111),
+            Rgb::new(140, 41, 129),
+            Rgb::new(221, 74, 105),
+            Rgb::new(254, 159, 109),
+            Rgb::new(252, 253, 191),
+        ];
+        for (i, want) in expected.iter().enumerate() {
+            assert_eq!(&sample_ramp(&ramp, i as f64 / 5.0), want);
+        }
+    }
+
+    #[test]
+    fn offset_formatting() {
+        assert_eq!(g6(0.0), "0");
+        assert_eq!(g6(0.5), "0.5");
+        assert_eq!(g6(1.0), "1");
+        assert_eq!(g6(1.0 / 51.0), "0.0196078");
+        assert_eq!(g6(0.509804), "0.509804");
+        assert_eq!(g6(0.980392), "0.980392");
     }
 
     #[test]

@@ -84,9 +84,16 @@ id starts with `_`.
     `graduatedMethod="GraduatedColor"`: `<ranges>` list `lower`/`upper`
     bounds (15 decimal digits) referencing symbols by index; `<symbols>`
     contains one symbol per class with colors interpolated along the
-    `<colorramp type="gradient">` (`color1` → `color2`);
+    `<colorramp type="gradient">`;
     `<classificationMethod id="Pretty">` with
     `<labelFormat format="%1 - %2">` drives the legend labels.
+  - The gradient `<colorramp>` holds the endpoints in `color1`/`color2`
+    and, if the ramp has intermediate stops (like `samples/magma.qgs`), a
+    `stops` option:
+    `offset;color;rgb;ccw:offset;color;rgb;ccw:...` where `offset` is in
+    `0..=1` (formatted with `%g`, 6 significant digits). Class colors are
+    piecewise-linear interpolations between consecutive control points in
+    RGB space, sampled at `i / (classes - 1)`.
 - Field-related nodes (`<fieldConfiguration>`, `<aliases>`, `<defaults>`,
   `<constraints>`, ...) repeat per-column boilerplate. QGIS regenerates
   them from the data source on load, so a generator can omit them.
