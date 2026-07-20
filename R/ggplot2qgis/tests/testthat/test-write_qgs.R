@@ -370,6 +370,19 @@ test_that("a non-symbol aesthetic is an error", {
   expect_error(write_qgs(p, path), "only a bare column name")
 })
 
+test_that("a layer backed by empty sf data is an error", {
+  nc <- read_nc()
+  empty <- nc[0, ]
+  p <- ggplot2::ggplot(empty) +
+    ggplot2::geom_sf(ggplot2::aes(fill = AREA))
+
+  dir <- local_out_dir()
+  expect_error(
+    write_qgs(p, file.path(dir, "proj.qgs")),
+    "layer 1: the data has no rows"
+  )
+})
+
 test_that("a plot without layers is an error", {
   nc <- read_nc()
   expect_error(

@@ -1,7 +1,7 @@
 # Number of equal-interval classes of a graduated renderer. QGIS classifies
 # the attribute into this many ranges; the colors are interpolated from the
 # gradient stops. High enough to approximate ggplot2's continuous gradient,
-# at the cost of a long legend. (VectorStyle$continuous would reproduce the
+# at the cost of a long legend. (style_continuous() would reproduce the
 # gradient exactly, but QGIS shows no color ramp in the legend for it.)
 QGS_GRADUATED_CLASSES <- 25L
 
@@ -94,7 +94,7 @@ write_qgs <- function(plot, path, use_plot_crs = FALSE,
   data_dir <- file.path(dirname(path), data_dir_name)
   dir.create(data_dir, recursive = TRUE, showWarnings = FALSE)
 
-  builder <- QgsBuilder$new()
+  qgs_layers <- vector("list", length(layers))
 
   # coord_sf() uses its crs argument if specified, otherwise the CRS of
   # the first layer that defines one; the built plot carries the result
@@ -108,7 +108,7 @@ write_qgs <- function(plot, path, use_plot_crs = FALSE,
   }
 
   # ggplot2's first layer is the bottom-most one, which is also the order
-  # QgsBuilder expects.
+  # qgs_build() expects.
   for (i in seq_along(layers)) {
     layer <- layers[[i]]
 
@@ -128,6 +128,9 @@ write_qgs <- function(plot, path, use_plot_crs = FALSE,
         call. = FALSE
       )
     }
+    if (nrow(d) == 0L) {
+      stop("layer ", i, ": the data has no rows", call. = FALSE)
+    }
 
     crs <- sf::st_crs(d)
     if (is.na(crs)) {
@@ -146,47 +149,37 @@ write_qgs <- function(plot, path, use_plot_crs = FALSE,
     sf::st_write(d, gpkg_path, layer = layer_name, quiet = TRUE)
 
     geometry <- qgs_geometry_type(d, i)
-    builder$add_vector_layer(
+    qgs_layers[[i]] <- vector_layer(
       # relative to the project file
       paste0(data_dir_name, "/", gpkg_file),
       layer_name,
-      qgs_srs(crs),
+      crs,
       geometry,
       qgs_vector_style(plot, built, layer, i, d, gradient_style, geometry)
     )
   }
 
-  if (use_plot_crs) {
-    builder$set_project_crs(qgs_srs(plot_crs))
-  }
-  builder$write_to(path)
+  project_srs <- if (use_plot_crs) resolve_srs(plot_crs)
+  qgs_write(qgs_layers, path, project_srs)
 
   invisible(path)
-}
-
-qgs_srs <- function(crs) {
-  if (!is.na(crs$epsg)) {
-    crs$epsg
-  } else {
-    crs$wkt
-  }
 }
 
 qgs_geometry_type <- function(d, i) {
   type <- as.character(sf::st_geometry_type(d, by_geometry = FALSE))
   switch(type,
     POINT = ,
-    MULTIPOINT = GeometryType$Point,
+    MULTIPOINT = "Point",
     LINESTRING = ,
-    MULTILINESTRING = GeometryType$LineString,
+    MULTILINESTRING = "LineString",
     POLYGON = ,
-    MULTIPOLYGON = GeometryType$Polygon,
+    MULTIPOLYGON = "Polygon",
     stop("layer ", i, ": unsupported geometry type ", type, call. = FALSE)
   )
 }
 
 # Resolves which aesthetic drives the color of the layer and returns the
-# matching VectorStyle. The layer's mapping takes precedence over the
+# matching style. The layer's mapping takes precedence over the
 # plot's, following how ggplot2 itself resolves aesthetics.
 qgs_vector_style <- function(plot, built, layer, i, d, gradient_style, geometry) {
   # aes() normalizes `color` to `colour`, so only these two keys exist.
@@ -204,7 +197,7 @@ qgs_vector_style <- function(plot, built, layer, i, d, gradient_style, geometry)
   # Rounded so binary float noise (0.15056250000000002) stays out of the
   # project file.
   outline_width <- round(const$linewidth * QGS_MM_PER_LINEWIDTH, 7)
-  is_polygon <- identical(geometry, GeometryType$Polygon)
+  is_polygon <- geometry == "Polygon"
 
   if (is.null(fill) && is.null(colour)) {
     return(qgs_single_style(const, is_polygon, outline_width))
@@ -239,16 +232,16 @@ qgs_vector_style <- function(plot, built, layer, i, d, gradient_style, geometry)
 
   if (aes_name == "fill") {
     # A constant border around the varying fill.
-    style$set_outline(qgs_rgb(const$colour), outline_width)
+    style <- style_set_outline(style, qgs_rgb(const$colour), outline_width)
   } else if (is_polygon) {
     # ggplot2 draws a colour aesthetic on polygons as the border color;
     # the interior keeps the constant fill. The outline color is ignored
     # for a stroke target, only its width applies.
-    style$set_stroke_target(qgs_rgb(const$fill))
-    style$set_outline(qgs_rgb(const$fill), outline_width)
-  } else if (identical(geometry, GeometryType$LineString)) {
+    style <- style_set_stroke_target(style, qgs_rgb(const$fill))
+    style <- style_set_outline(style, qgs_rgb(const$fill), outline_width)
+  } else if (geometry == "LineString") {
     # The line color is the varying one; only the width is constant.
-    style$set_outline(qgs_rgb(const$fill), outline_width)
+    style <- style_set_outline(style, qgs_rgb(const$fill), outline_width)
   }
   # Points with a varying colour keep the QGIS marker defaults for the
   # ring around the marker.
@@ -262,7 +255,7 @@ qgs_vector_style <- function(plot, built, layer, i, d, gradient_style, geometry)
 qgs_layer_constants <- function(computed) {
   first_or <- function(name, default) {
     v <- computed[[name]]
-    if (is.null(v) || is.na(v[[1L]])) default else v[[1L]]
+    if (length(v) == 0L || is.na(v[[1L]])) default else v[[1L]]
   }
   list(
     colour = first_or("colour", "grey35"),
@@ -277,9 +270,11 @@ qgs_layer_constants <- function(computed) {
 # have no distinct border).
 qgs_single_style <- function(const, is_polygon, outline_width) {
   main <- if (is_polygon) const$fill else const$colour
-  style <- VectorStyle$single(qgs_rgb(main))
-  style$set_outline(qgs_rgb(const$colour), outline_width)
-  style
+  style_set_outline(
+    style_single(qgs_rgb(main)),
+    qgs_rgb(const$colour),
+    outline_width
+  )
 }
 
 # The gradient of a trained continuous scale, sampled at evenly spaced
@@ -307,29 +302,23 @@ qgs_gradient_ramp <- function(scale, attribute, i) {
 qgs_graduated_style <- function(scale, attribute, i) {
   ramp <- qgs_gradient_ramp(scale, attribute, i)
 
-  VectorStyle$graduated(
+  style_graduated(
     attribute,
     classes = QGS_GRADUATED_CLASSES,
     min = ramp$limits[1L],
     max = ramp$limits[2L],
-    stop_offsets = ramp$offsets,
-    stop_r = ramp$colors["red", ],
-    stop_g = ramp$colors["green", ],
-    stop_b = ramp$colors["blue", ]
+    stops = list(offsets = ramp$offsets, colors = ramp$colors)
   )
 }
 
 qgs_continuous_style <- function(scale, attribute, i) {
   ramp <- qgs_gradient_ramp(scale, attribute, i)
 
-  VectorStyle$continuous(
+  style_continuous(
     attribute,
     min = ramp$limits[1L],
     max = ramp$limits[2L],
-    stop_offsets = ramp$offsets,
-    stop_r = ramp$colors["red", ],
-    stop_g = ramp$colors["green", ],
-    stop_b = ramp$colors["blue", ]
+    stops = list(offsets = ramp$offsets, colors = ramp$colors)
   )
 }
 
@@ -344,16 +333,9 @@ qgs_categorized_style <- function(scale, attribute, i) {
   }
   colors <- grDevices::col2rgb(scale$map(values))
 
-  VectorStyle$categorized(
-    attribute,
-    values = as.character(values),
-    colors_r = colors["red", ],
-    colors_g = colors["green", ],
-    colors_b = colors["blue", ]
-  )
+  style_categorized(attribute, as.character(values), colors)
 }
 
 qgs_rgb <- function(color) {
-  rgb <- grDevices::col2rgb(color)
-  Rgb$new(rgb[1L], rgb[2L], rgb[3L])
+  grDevices::col2rgb(color)[, 1L]
 }
