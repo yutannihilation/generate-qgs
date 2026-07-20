@@ -1,4 +1,4 @@
-//! Data for the demo binary (`main.rs`), extracted from the samples.
+//! Data for the demo example (`main.rs`), extracted from the samples.
 
 use generate_qgs::Rgb;
 

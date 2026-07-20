@@ -99,7 +99,7 @@ b.write_to("project.qgs")?;
 
 ## Demo
 
-`cargo run` writes projects equivalent to the samples into `out/`:
+`cargo run --example demo` writes projects equivalent to the samples into `out/`:
 
 - `out/load.qgs` — XYZ tile layer + single-color vector layer
 - `out/red.qgs` — XYZ tile layer + graduated-color vector layer (two-color ramp)
