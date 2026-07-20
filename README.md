@@ -46,7 +46,7 @@ b.add_vector_layer(
             (0.5, Rgb::new(180, 54, 122)),
             (1.0, Rgb::new(252, 253, 191)),
         ],
-    ),
+    )?,
 )?;
 
 // Or a discrete color per attribute value ("categorized" in QGIS), with an
@@ -60,7 +60,7 @@ b.add_vector_layer(
         "NAME",
         &[("Alamance", Rgb::new(255, 255, 255)), ("Alexander", Rgb::new(255, 252, 252))],
         Some(Rgb::new(255, 0, 0)),
-    ),
+    )?,
 )?;
 
 // Raster layers (GeoTIFF) work too: single-band pseudocolor with a
@@ -74,7 +74,7 @@ b.add_raster_layer(
         80.0,
         200.0,
         &[(0.0, Rgb::new(215, 25, 28)), (1.0, Rgb::new(43, 131, 186))],
-    ),
+    )?,
 )?;
 
 // ...discrete pseudocolor classes (RasterStyle::pseudocolor_discrete),
@@ -84,7 +84,7 @@ b.add_raster_layer(
     "../tmp/cyl_tile.tif",
     "cyl_tile",
     3857,
-    RasterStyle::multiband((1, 35.0, 253.0), (2, 35.0, 251.0), (3, 35.0, 250.0)),
+    RasterStyle::multiband((1, 35.0, 253.0), (2, 35.0, 251.0), (3, 35.0, 250.0))?,
 )?;
 
 b.write_to("project.qgs")?;

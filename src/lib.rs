@@ -43,7 +43,7 @@ use std::path::Path;
 pub use srs::{Srs, SrsError};
 pub use style::{
     GeometryType, GraduatedStyle, MultibandColorStyle, PseudocolorMode, PseudocolorStyle,
-    RasterStyle, Rgb, SimpleStyle, VectorStyle,
+    RasterStyle, Rgb, SimpleStyle, StyleError, VectorStyle,
 };
 
 use layers::{Layer, RasterLayer, VectorLayer, XyzLayer};
@@ -232,7 +232,8 @@ mod tests {
                 0.0,
                 57.0,
                 &[(0.0, Rgb::new(255, 255, 255)), (1.0, Rgb::new(255, 0, 0))],
-            ),
+            )
+            .unwrap(),
         )
         .unwrap();
         b
