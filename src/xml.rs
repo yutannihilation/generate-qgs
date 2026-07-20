@@ -130,7 +130,7 @@ pub(crate) fn escape_attr(buf: &mut String, s: &str) {
         match c {
             '&' => buf.push_str("&amp;"),
             '<' => buf.push_str("&lt;"),
-            '>' => buf.push_str("&gt;"),
+            // QGIS (QDom) does not escape `>` in attribute values.
             '"' => buf.push_str("&quot;"),
             _ => buf.push(c),
         }
@@ -175,7 +175,7 @@ mod tests {
         w.end();
         assert_eq!(
             w.finish(),
-            "\n<a k=\"v&amp;&lt;&gt;&quot;\">t&amp;&lt;&gt;</a>"
+            "\n<a k=\"v&amp;&lt;>&quot;\">t&amp;&lt;&gt;</a>"
         );
     }
 }

@@ -4,10 +4,16 @@ Generate .qgs XML file
 A quick-and-dirty Rust crate for generating QGIS project (`.qgs`) files
 programmatically. See `docs/qgs-and-qgz.md` for notes on the file format.
 
+Supported layers: XYZ tiles, GeoPackage vector layers and GeoTIFF raster
+layers. The data files are never read; everything QGIS needs to know
+about them (SRS, styles, band statistics, ...) is passed explicitly, and
+anything QGIS can recompute on load (extent, metadata boilerplate) is
+omitted from the generated project.
+
 ## Usage
 
 ```rust
-use generate_qgs::{GeometryType, QgsBuilder, Rgb, VectorStyle};
+use generate_qgs::{GeometryType, QgsBuilder, RasterStyle, Rgb, VectorStyle};
 
 let mut b = QgsBuilder::new();
 
@@ -64,6 +70,30 @@ b.add_vector_layer(
     ),
 )?;
 
+// Raster layers (GeoTIFF) work too: single-band pseudocolor with a
+// continuous ("interpolated") color ramp...
+b.add_raster_layer(
+    "../tmp/volcano2.tif",
+    "volcano2",
+    2193,
+    RasterStyle::pseudocolor(
+        5,
+        80.0,
+        200.0,
+        &[(0.0, Rgb::new(215, 25, 28)), (1.0, Rgb::new(43, 131, 186))],
+    ),
+)?;
+
+// ...discrete pseudocolor classes (RasterStyle::pseudocolor_discrete),
+// or true-color RGB from three bands, each given as
+// (band, min, max) — the band statistics QGIS caches as stretch limits:
+b.add_raster_layer(
+    "../tmp/cyl_tile.tif",
+    "cyl_tile",
+    3857,
+    RasterStyle::multiband((1, 35.0, 253.0), (2, 35.0, 251.0), (3, 35.0, 250.0)),
+)?;
+
 b.write_to("project.qgs")?;
 ```
 
@@ -75,6 +105,9 @@ b.write_to("project.qgs")?;
 - `out/red.qgs` — XYZ tile layer + graduated-color vector layer (two-color ramp)
 - `out/magma.qgs` — XYZ tile layer + graduated-color vector layer (magma ramp with many color stops)
 - `out/categorized.qgs` — XYZ tile layer + categorized vector layer (discrete color per value)
+- `out/elevation.qgs` — GeoTIFF raster with a continuous pseudocolor ramp
+- `out/elevation_discrete.qgs` — GeoTIFF raster with a discrete pseudocolor ramp
+- `out/true-color.qgs` — three-band GeoTIFF raster rendered as RGB
 
 ## Sample .qgs files
 
@@ -83,3 +116,6 @@ b.write_to("project.qgs")?;
 - `red.qgs`: a QGIS project with two layers: XYZ tile and .gpkg (gradient based on attribute value)
 - `magma.qgs`: a QGIS project with two layers: XYZ tile and .gpkg (magma color ramp based on attribute value)
 - `categorized.qgs`: a QGIS project with two layers: XYZ tile and .gpkg (discrete color per attribute value)
+- `elevation.qgs`: single-band .tif raster with a continuous (interpolated) pseudocolor ramp
+- `elevation_discrete.qgs`: single-band .tif raster with a discrete pseudocolor ramp
+- `true-color.qgs`: three-band .tif raster rendered as RGB (multiband color)

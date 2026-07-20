@@ -38,6 +38,11 @@ impl Rgb {
         )
     }
 
+    /// `#rrggbb`, used by raster color ramp items.
+    pub(crate) fn hex(&self) -> String {
+        format!("#{:02x}{:02x}{:02x}", self.r, self.g, self.b)
+    }
+
     /// Linear interpolation in RGB space (matches QGIS color ramps).
     fn lerp(self, other: Rgb, t: f64) -> Rgb {
         let f = |a: u8, b: u8| (f64::from(a) + (f64::from(b) - f64::from(a)) * t).round() as u8;
@@ -45,9 +50,11 @@ impl Rgb {
     }
 }
 
-/// Formats one channel as a float in `0..=1` the way QGIS does (`%.7g`-ish).
+/// Formats one channel as a float in `0..=1` the way QGIS does: `%.7f` of
+/// the 32-bit float, trailing zeros stripped (e.g. `0.9098039`, `0.682353`).
+/// Verified against every channel value in the samples.
 fn channel(v: u8) -> String {
-    let s = format!("{:.7}", f64::from(v) / 255.0);
+    let s = format!("{:.7}", f32::from(v) / 255.0);
     s.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
@@ -153,6 +160,144 @@ pub struct CategorizedStyle {
     pub outline_color: Rgb,
     /// Stroke width in millimeters.
     pub outline_width: f64,
+}
+
+/// How a raster layer is rendered.
+#[derive(Debug, Clone)]
+pub enum RasterStyle {
+    /// One band colored through a color ramp (like `samples/elevation.qgs`
+    /// and `samples/elevation_discrete.qgs`).
+    SingleBandPseudocolor(PseudocolorStyle),
+    /// Three bands mapped to the RGB channels (like
+    /// `samples/true-color.qgs`).
+    MultibandColor(MultibandColorStyle),
+}
+
+/// Continuous vs. discrete coloring for [`RasterStyle::SingleBandPseudocolor`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PseudocolorMode {
+    /// `colorRampType="INTERPOLATED"`: colors interpolate smoothly between
+    /// `min` and `max`.
+    Interpolated,
+    /// `colorRampType="DISCRETE"`: one flat color per equal-interval class.
+    Discrete,
+}
+
+/// Style for [`RasterStyle::SingleBandPseudocolor`].
+///
+/// Class values are equal-interval between `min` and `max`; class colors
+/// are sampled from `color_stops`, a gradient of control points
+/// `(offset, color)` with offsets in `0..=1` — the same sampling rule as
+/// [`VectorStyle::Graduated`].
+#[derive(Debug, Clone)]
+pub struct PseudocolorStyle {
+    /// Band to colorize (1-based).
+    pub band: u32,
+    pub mode: PseudocolorMode,
+    /// Number of classes (>= 2).
+    pub classes: usize,
+    pub min: f64,
+    pub max: f64,
+    /// Gradient control points `(offset, color)`, sorted by offset;
+    /// the first must be at `0.0` and the last at `1.0`.
+    pub color_stops: Vec<(f64, Rgb)>,
+}
+
+/// Style for [`RasterStyle::MultibandColor`].
+///
+/// Each channel is a `(band, min, max)` tuple: the band number (1-based)
+/// and the band's min/max statistics, which QGIS caches as the contrast
+/// stretch limits. With the default `NoEnhancement` algorithm the values
+/// are rendered as-is, so the limits only matter if the user switches on
+/// stretching inside QGIS.
+#[derive(Debug, Clone)]
+pub struct MultibandColorStyle {
+    pub red: (u32, f64, f64),
+    pub green: (u32, f64, f64),
+    pub blue: (u32, f64, f64),
+}
+
+impl RasterStyle {
+    /// Continuous pseudocolor of band 1 with `classes` equally spaced ramp
+    /// entries between `min` and `max` (like `samples/elevation.qgs`).
+    /// `color_stops` follows the same rules as [`VectorStyle::graduated`].
+    pub fn pseudocolor(
+        classes: usize,
+        min: f64,
+        max: f64,
+        color_stops: &[(f64, Rgb)],
+    ) -> Self {
+        Self::pseudocolor_with_mode(PseudocolorMode::Interpolated, classes, min, max, color_stops)
+    }
+
+    /// Discrete pseudocolor of band 1 with `classes` equal-interval classes
+    /// between `min` and `max` (like `samples/elevation_discrete.qgs`).
+    pub fn pseudocolor_discrete(
+        classes: usize,
+        min: f64,
+        max: f64,
+        color_stops: &[(f64, Rgb)],
+    ) -> Self {
+        Self::pseudocolor_with_mode(PseudocolorMode::Discrete, classes, min, max, color_stops)
+    }
+
+    fn pseudocolor_with_mode(
+        mode: PseudocolorMode,
+        classes: usize,
+        min: f64,
+        max: f64,
+        color_stops: &[(f64, Rgb)],
+    ) -> Self {
+        assert!(classes >= 2, "pseudocolor style needs at least 2 classes");
+        assert!(min < max, "pseudocolor style needs min < max");
+        assert!(
+            color_stops.len() >= 2,
+            "pseudocolor style needs at least 2 color stops"
+        );
+        assert!(
+            color_stops.first().unwrap().0 == 0.0,
+            "first color stop must be at offset 0.0"
+        );
+        assert!(
+            color_stops.last().unwrap().0 == 1.0,
+            "last color stop must be at offset 1.0"
+        );
+        assert!(
+            color_stops.windows(2).all(|w| w[0].0 < w[1].0),
+            "color stops must be in ascending offset order"
+        );
+        RasterStyle::SingleBandPseudocolor(PseudocolorStyle {
+            band: 1,
+            mode,
+            classes,
+            min,
+            max,
+            color_stops: color_stops.to_vec(),
+        })
+    }
+
+    /// True-color rendering of three bands (like `samples/true-color.qgs`).
+    /// Each channel is `(band, min, max)`; see [`MultibandColorStyle`].
+    pub fn multiband(
+        red: (u32, f64, f64),
+        green: (u32, f64, f64),
+        blue: (u32, f64, f64),
+    ) -> Self {
+        for (band, min, max) in [red, green, blue] {
+            assert!(band >= 1, "band numbers are 1-based");
+            assert!(min <= max, "multiband style needs min <= max");
+        }
+        RasterStyle::MultibandColor(MultibandColorStyle { red, green, blue })
+    }
+
+    /// Number of `<noDataList>` entries to emit: one per band, up to the
+    /// highest band referenced by the style.
+    pub(crate) fn band_count(&self) -> u32 {
+        match self {
+            RasterStyle::SingleBandPseudocolor(p) => p.band,
+            RasterStyle::MultibandColor(m) => m.red.0.max(m.green.0).max(m.blue.0),
+        }
+    }
 }
 
 impl VectorStyle {
@@ -629,6 +774,159 @@ pub(crate) fn write_renderer(w: &mut XmlWriter, geom: GeometryType, style: &Vect
     }
 }
 
+/// The `<minMaxOrigin>` block inside `<rasterrenderer>` (raster layers).
+/// `limits` is `None` for user-defined bounds, `MinMax` when they come
+/// from band statistics.
+pub(crate) fn write_min_max_origin(w: &mut XmlWriter, limits: &str) {
+    w.start("minMaxOrigin");
+    w.elem("limits", limits);
+    w.elem("extent", "WholeRaster");
+    w.elem("statAccuracy", "Estimated");
+    w.elem("cumulativeCutLower", "0.02");
+    w.elem("cumulativeCutUpper", "0.98");
+    w.elem("stdDevFactor", "2");
+    w.end(); // minMaxOrigin
+}
+
+/// The static `<rampLegendSettings>` block of a pseudocolor shader.
+fn write_ramp_legend_settings(w: &mut XmlWriter) {
+    w.start("rampLegendSettings")
+        .attr("direction", "0")
+        .attr("maximumLabel", "")
+        .attr("minimumLabel", "")
+        .attr("orientation", "2")
+        .attr("prefix", "")
+        .attr("suffix", "")
+        .attr("useContinuousLegend", "1");
+    w.start("numericFormat").attr("id", "basic");
+    w.start("Option").attr("type", "Map");
+    w.empty("Option", &[("name", "decimal_separator"), ("type", "invalid")]);
+    w.empty("Option", &[("name", "decimals"), ("type", "int"), ("value", "6")]);
+    w.empty("Option", &[("name", "rounding_type"), ("type", "int"), ("value", "0")]);
+    w.empty("Option", &[("name", "show_plus"), ("type", "bool"), ("value", "false")]);
+    w.empty(
+        "Option",
+        &[("name", "show_thousand_separator"), ("type", "bool"), ("value", "true")],
+    );
+    w.empty(
+        "Option",
+        &[("name", "show_trailing_zeros"), ("type", "bool"), ("value", "false")],
+    );
+    w.empty("Option", &[("name", "thousand_separator"), ("type", "invalid")]);
+    w.end(); // Option
+    w.end(); // numericFormat
+    w.end(); // rampLegendSettings
+}
+
+/// One `<item>` of a pseudocolor shader.
+fn write_shader_item(w: &mut XmlWriter, color: Rgb, label: &str, value: &str) {
+    w.empty(
+        "item",
+        &[
+            ("alpha", "255"),
+            ("color", &color.hex()),
+            ("label", label),
+            ("value", value),
+        ],
+    );
+}
+
+/// Writes the `<rasterrenderer>` element for a raster layer.
+pub(crate) fn write_raster_renderer(w: &mut XmlWriter, style: &RasterStyle) {
+    match style {
+        RasterStyle::SingleBandPseudocolor(p) => {
+            let n = p.classes;
+            let (ramp_type, classification_mode) = match p.mode {
+                PseudocolorMode::Interpolated => ("INTERPOLATED", "1"),
+                PseudocolorMode::Discrete => ("DISCRETE", "2"),
+            };
+            w.start("rasterrenderer")
+                .attr("alphaBand", "-1")
+                .attr("band", p.band)
+                .attr("classificationMax", num(p.max))
+                .attr("classificationMin", num(p.min))
+                .attr("nodataColor", "")
+                .attr("opacity", "1")
+                .attr("type", "singlebandpseudocolor");
+            w.empty("rasterTransparency", &[]);
+            write_min_max_origin(w, "None");
+            w.start("rastershader");
+            w.start("colorrampshader")
+                .attr("classificationMode", classification_mode)
+                .attr("clip", "0")
+                .attr("colorRampType", ramp_type)
+                .attr("labelPrecision", "0")
+                .attr("maximumValue", num(p.max))
+                .attr("minimumValue", num(p.min));
+            write_gradient_colorramp(
+                w,
+                p.color_stops[0].1,
+                p.color_stops[p.color_stops.len() - 1].1,
+                &p.color_stops[1..p.color_stops.len() - 1],
+            );
+            // Class colors are sampled along the ramp at i/(n-1), the same
+            // rule as the vector graduated renderer.
+            match p.mode {
+                PseudocolorMode::Interpolated => {
+                    for i in 0..n {
+                        let t = i as f64 / (n - 1) as f64;
+                        let value = num(p.min + (p.max - p.min) * t);
+                        write_shader_item(w, sample_ramp(&p.color_stops, t), &value, &value);
+                    }
+                }
+                PseudocolorMode::Discrete => {
+                    let step = (p.max - p.min) / n as f64;
+                    for i in 0..n {
+                        let t = i as f64 / (n - 1) as f64;
+                        let color = sample_ramp(&p.color_stops, t);
+                        let lower = p.min + i as f64 * step;
+                        if i == n - 1 {
+                            // Open-ended top class.
+                            write_shader_item(w, color, &format!("> {}", num(lower)), "inf");
+                        } else {
+                            let upper = num(lower + step);
+                            let label = if i == 0 {
+                                format!("<= {upper}")
+                            } else {
+                                format!("{} - {}", num(lower), upper)
+                            };
+                            write_shader_item(w, color, &label, &upper);
+                        }
+                    }
+                }
+            }
+            write_ramp_legend_settings(w);
+            w.end(); // colorrampshader
+            w.end(); // rastershader
+            w.end(); // rasterrenderer
+        }
+        RasterStyle::MultibandColor(m) => {
+            w.start("rasterrenderer")
+                .attr("alphaBand", "-1")
+                .attr("blueBand", m.blue.0)
+                .attr("greenBand", m.green.0)
+                .attr("nodataColor", "")
+                .attr("opacity", "1")
+                .attr("redBand", m.red.0)
+                .attr("type", "multibandcolor");
+            w.empty("rasterTransparency", &[]);
+            write_min_max_origin(w, "MinMax");
+            for (tag, (_, min, max)) in [
+                ("redContrastEnhancement", m.red),
+                ("greenContrastEnhancement", m.green),
+                ("blueContrastEnhancement", m.blue),
+            ] {
+                w.start(tag);
+                w.elem("minValue", &num(min));
+                w.elem("maxValue", &num(max));
+                w.elem("algorithm", "NoEnhancement");
+                w.end(); // tag
+            }
+            w.end(); // rasterrenderer
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -747,5 +1045,97 @@ mod tests {
         assert!(out.contains("255,255,255,255,rgb:1,1,1,1"));
         assert!(out.contains("255,252,252,255,rgb:1,0.9882353,0.9882353,1"));
         assert!(out.contains("255,0,0,255,rgb:1,0,0,1"));
+    }
+
+    /// The ramp of the elevation samples (`samples/elevation*.qgs`).
+    const SPECTRAL: &[(f64, Rgb)] = &[
+        (0.0, Rgb::new(215, 25, 28)),
+        (0.25, Rgb::new(253, 174, 97)),
+        (0.5, Rgb::new(255, 255, 191)),
+        (0.75, Rgb::new(171, 221, 164)),
+        (1.0, Rgb::new(43, 131, 186)),
+    ];
+
+    #[test]
+    fn pseudocolor_interpolated_matches_sample() {
+        // samples/elevation.qgs: 5 items at 80..200.
+        let style = RasterStyle::pseudocolor(5, 80.0, 200.0, SPECTRAL);
+        let mut w = XmlWriter::new(0);
+        write_raster_renderer(&mut w, &style);
+        let out = w.finish();
+
+        assert!(out.contains("type=\"singlebandpseudocolor\""));
+        assert!(out.contains("classificationMax=\"200\" classificationMin=\"80\""));
+        assert!(out.contains("colorRampType=\"INTERPOLATED\""));
+        assert!(out.contains("classificationMode=\"1\""));
+        assert!(out.contains("maximumValue=\"200\" minimumValue=\"80\""));
+        for (color, value) in [
+            ("#d7191c", "80"),
+            ("#fdae61", "110"),
+            ("#ffffbf", "140"),
+            ("#abdda4", "170"),
+            ("#2b83ba", "200"),
+        ] {
+            assert!(
+                out.contains(&format!(
+                    "<item alpha=\"255\" color=\"{color}\" label=\"{value}\" value=\"{value}\"/>"
+                )),
+                "missing item {value}"
+            );
+        }
+    }
+
+    #[test]
+    fn pseudocolor_discrete_matches_sample() {
+        // samples/elevation_discrete.qgs: 10 classes over 80..200.
+        let style = RasterStyle::pseudocolor_discrete(10, 80.0, 200.0, SPECTRAL);
+        let mut w = XmlWriter::new(0);
+        write_raster_renderer(&mut w, &style);
+        let out = w.finish();
+
+        assert!(out.contains("colorRampType=\"DISCRETE\""));
+        assert!(out.contains("classificationMode=\"2\""));
+        for (color, label, value) in [
+            ("#d7191c", "&lt;= 92", "92"),
+            ("#e85b3b", "92 - 104", "104"),
+            ("#f99d59", "104 - 116", "116"),
+            ("#fec980", "116 - 128", "128"),
+            ("#ffedaa", "128 - 140", "140"),
+            ("#ecf7b9", "140 - 152", "152"),
+            ("#c7e8ad", "152 - 164", "164"),
+            ("#9dd3a6", "164 - 176", "176"),
+            ("#64abb0", "176 - 188", "188"),
+            ("#2b83ba", "> 188", "inf"),
+        ] {
+            assert!(
+                out.contains(&format!(
+                    "<item alpha=\"255\" color=\"{color}\" label=\"{label}\" value=\"{value}\"/>"
+                )),
+                "missing item {label}"
+            );
+        }
+    }
+
+    #[test]
+    fn multiband_matches_sample() {
+        // samples/true-color.qgs.
+        let style = RasterStyle::multiband((1, 35.0, 253.0), (2, 35.0, 251.0), (3, 35.0, 250.0));
+        let mut w = XmlWriter::new(0);
+        write_raster_renderer(&mut w, &style);
+        let out = w.finish();
+
+        assert!(out.contains("type=\"multibandcolor\""));
+        assert!(out.contains("redBand=\"1\""));
+        assert!(out.contains("greenBand=\"2\""));
+        assert!(out.contains("blueBand=\"3\""));
+        for (tag, max) in [
+            ("redContrastEnhancement", "253"),
+            ("greenContrastEnhancement", "251"),
+            ("blueContrastEnhancement", "250"),
+        ] {
+            assert!(out.contains(&format!(
+                "<{tag}>\n    <minValue>35</minValue>\n    <maxValue>{max}</maxValue>\n    <algorithm>NoEnhancement</algorithm>"
+            )));
+        }
     }
 }

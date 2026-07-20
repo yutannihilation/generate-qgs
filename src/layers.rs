@@ -4,7 +4,10 @@
 //! (see `docs/qgs-and-qgz.md`); this module renders all of them.
 
 use crate::srs::{ResolvedSrs, write_spatialrefsys};
-use crate::style::{GeometryType, VectorStyle, write_renderer};
+use crate::style::{
+    GeometryType, RasterStyle, VectorStyle, write_min_max_origin, write_raster_renderer,
+    write_renderer,
+};
 use crate::xml::XmlWriter;
 
 pub(crate) struct XyzLayer {
@@ -25,9 +28,18 @@ pub(crate) struct VectorLayer {
     pub style: VectorStyle,
 }
 
+pub(crate) struct RasterLayer {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+    pub srs: ResolvedSrs,
+    pub style: RasterStyle,
+}
+
 pub(crate) enum Layer {
     Xyz(XyzLayer),
     Vector(VectorLayer),
+    Raster(RasterLayer),
 }
 
 /// Percent-encodes everything except unreserved characters (RFC 3986),
@@ -75,6 +87,7 @@ impl Layer {
         match self {
             Layer::Xyz(l) => &l.id,
             Layer::Vector(l) => &l.id,
+            Layer::Raster(l) => &l.id,
         }
     }
 
@@ -82,6 +95,7 @@ impl Layer {
         match self {
             Layer::Xyz(l) => &l.name,
             Layer::Vector(l) => &l.name,
+            Layer::Raster(l) => &l.name,
         }
     }
 
@@ -89,6 +103,7 @@ impl Layer {
         match self {
             Layer::Xyz(_) => "wms",
             Layer::Vector(_) => "ogr",
+            Layer::Raster(_) => "gdal",
         }
     }
 
@@ -96,6 +111,8 @@ impl Layer {
         match self {
             Layer::Xyz(l) => l.datasource(),
             Layer::Vector(l) => l.datasource(),
+            // The gdal-provider datasource is the plain file path.
+            Layer::Raster(l) => l.path.clone(),
         }
     }
 
@@ -145,6 +162,7 @@ impl Layer {
         match self {
             Layer::Xyz(l) => write_xyz_maplayer(w, l),
             Layer::Vector(l) => write_vector_maplayer(w, l),
+            Layer::Raster(l) => write_raster_maplayer(w, l),
         }
     }
 }
@@ -167,6 +185,46 @@ fn write_extent(w: &mut XmlWriter, tag: &str, corners: [&str; 4]) {
     w.elem("xmax", corners[2]);
     w.elem("ymax", corners[3]);
     w.end();
+}
+
+/// The `<pipe><provider><resampling .../></provider>` part of a raster
+/// maplayer — identical for XYZ tiles and GDAL layers.
+fn write_pipe_provider(w: &mut XmlWriter) {
+    w.start("provider");
+    w.empty(
+        "resampling",
+        &[
+            ("enabled", "false"),
+            ("maxOversampling", "2"),
+            ("zoomedInResamplingMethod", "nearestNeighbour"),
+            ("zoomedOutResamplingMethod", "nearestNeighbour"),
+        ],
+    );
+    w.end(); // provider
+}
+
+/// The `<pipe>` tail after the renderer — identical for XYZ tiles and
+/// GDAL layers.
+fn write_pipe_tail(w: &mut XmlWriter) {
+    w.empty(
+        "brightnesscontrast",
+        &[("brightness", "0"), ("contrast", "0"), ("gamma", "1")],
+    );
+    w.empty(
+        "huesaturation",
+        &[
+            ("colorizeBlue", "128"),
+            ("colorizeGreen", "128"),
+            ("colorizeOn", "0"),
+            ("colorizeRed", "255"),
+            ("colorizeStrength", "100"),
+            ("grayscaleMode", "0"),
+            ("invertColors", "0"),
+            ("saturation", "0"),
+        ],
+    );
+    w.empty("rasterresampler", &[("maxOversampling", "2")]);
+    w.elem("resamplingStage", "resamplingFilter");
 }
 
 fn write_xyz_maplayer(w: &mut XmlWriter, layer: &XyzLayer) {
@@ -222,17 +280,7 @@ fn write_xyz_maplayer(w: &mut XmlWriter, layer: &XyzLayer) {
     w.end(); // Option
     w.end(); // customproperties
     w.start("pipe");
-    w.start("provider");
-    w.empty(
-        "resampling",
-        &[
-            ("enabled", "false"),
-            ("maxOversampling", "2"),
-            ("zoomedInResamplingMethod", "nearestNeighbour"),
-            ("zoomedOutResamplingMethod", "nearestNeighbour"),
-        ],
-    );
-    w.end(); // provider
+    write_pipe_provider(w);
     w.start("rasterrenderer")
         .attr("alphaBand", "-1")
         .attr("band", "1")
@@ -240,34 +288,53 @@ fn write_xyz_maplayer(w: &mut XmlWriter, layer: &XyzLayer) {
         .attr("opacity", "1")
         .attr("type", "singlebandcolordata");
     w.empty("rasterTransparency", &[]);
-    w.start("minMaxOrigin");
-    w.elem("limits", "None");
-    w.elem("extent", "WholeRaster");
-    w.elem("statAccuracy", "Estimated");
-    w.elem("cumulativeCutLower", "0.02");
-    w.elem("cumulativeCutUpper", "0.98");
-    w.elem("stdDevFactor", "2");
-    w.end(); // minMaxOrigin
+    write_min_max_origin(w, "None");
     w.end(); // rasterrenderer
-    w.empty(
-        "brightnesscontrast",
-        &[("brightness", "0"), ("contrast", "0"), ("gamma", "1")],
-    );
-    w.empty(
-        "huesaturation",
-        &[
-            ("colorizeBlue", "128"),
-            ("colorizeGreen", "128"),
-            ("colorizeOn", "0"),
-            ("colorizeRed", "255"),
-            ("colorizeStrength", "100"),
-            ("grayscaleMode", "0"),
-            ("invertColors", "0"),
-            ("saturation", "0"),
-        ],
-    );
-    w.empty("rasterresampler", &[("maxOversampling", "2")]);
-    w.elem("resamplingStage", "resamplingFilter");
+    write_pipe_tail(w);
+    w.end(); // pipe
+    w.elem("blendMode", "0");
+    w.empty("legend", &[]);
+    w.end(); // maplayer
+}
+
+/// GDAL raster layer (`samples/elevation.qgs`, `samples/true-color.qgs`).
+/// `<extent>`/`<wgs84extent>` and the metadata boilerplate
+/// (`<resourceMetadata>`, `<temporal>`, `<elevation>`, ...) are omitted:
+/// QGIS recomputes them from the data source on load, like it does for
+/// vector layers.
+fn write_raster_maplayer(w: &mut XmlWriter, layer: &RasterLayer) {
+    w.start("maplayer")
+        .attr("autoRefreshMode", "Disabled")
+        .attr("autoRefreshTime", "0")
+        .attr("hasScaleBasedVisibilityFlag", "0")
+        .attr("layerType", "Raster")
+        .attr("legendPlaceholderImage", "")
+        .attr("maxScale", "0")
+        .attr("minScale", "1e+08")
+        .attr("refreshOnNotifyEnabled", "0")
+        .attr("refreshOnNotifyMessage", "")
+        .attr("styleCategories", "AllStyleCategories")
+        .attr("type", "raster");
+    w.elem("id", &layer.id);
+    w.elem("datasource", &layer.path);
+    w.elem("layername", &layer.name);
+    w.start("srs");
+    write_spatialrefsys(w, &layer.srs);
+    w.end(); // srs
+    w.elem("provider", "gdal");
+    w.start("noData");
+    for band in 1..=layer.style.band_count() {
+        w.empty(
+            "noDataList",
+            &[("bandNo", &band.to_string()), ("useSrcNoData", "1")],
+        );
+    }
+    w.end(); // noData
+    write_flags(w);
+    w.start("pipe");
+    write_pipe_provider(w);
+    write_raster_renderer(w, &layer.style);
+    write_pipe_tail(w);
     w.end(); // pipe
     w.elem("blendMode", "0");
     w.empty("legend", &[]);

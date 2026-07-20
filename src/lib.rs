@@ -41,9 +41,12 @@ use std::io;
 use std::path::Path;
 
 pub use srs::{Srs, SrsError};
-pub use style::{GeometryType, GraduatedStyle, Rgb, SimpleStyle, VectorStyle};
+pub use style::{
+    GeometryType, GraduatedStyle, MultibandColorStyle, PseudocolorMode, PseudocolorStyle, Rgb,
+    RasterStyle, SimpleStyle, VectorStyle,
+};
 
-use layers::{Layer, VectorLayer, XyzLayer};
+use layers::{Layer, RasterLayer, VectorLayer, XyzLayer};
 use xml::XmlWriter;
 
 /// The static project scaffold, adapted from `samples/blank.qgs`.
@@ -109,6 +112,36 @@ impl QgsBuilder {
             path: path.to_string(),
             srs: srs.into().resolve()?,
             geometry,
+            style,
+        }));
+        Ok(self)
+    }
+
+    /// Adds a raster layer from a local file (e.g. GeoTIFF), loaded through
+    /// the GDAL provider.
+    ///
+    /// * `path` — path to the raster file, embedded verbatim into the
+    ///   project. A relative path is resolved by QGIS against the location
+    ///   of the saved `.qgs` file.
+    /// * `layer_name` — display name of the layer.
+    /// * `srs` — SRS of the data (cannot be derived without reading the
+    ///   file, so it must be stated): either an EPSG code or a WKT2 string;
+    ///   see [`Srs`].
+    /// * `style` — how the raster is rendered, see [`RasterStyle`].
+    ///
+    /// Returns an error if the SRS cannot be resolved.
+    pub fn add_raster_layer(
+        &mut self,
+        path: &str,
+        layer_name: &str,
+        srs: impl Into<Srs>,
+        style: RasterStyle,
+    ) -> Result<&mut Self, SrsError> {
+        self.layers.push(Layer::Raster(RasterLayer {
+            id: ids::layer_id(layer_name),
+            name: layer_name.to_string(),
+            path: path.to_string(),
+            srs: srs.into().resolve()?,
             style,
         }));
         Ok(self)
