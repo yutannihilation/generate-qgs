@@ -101,6 +101,11 @@ SEXP savvy_VectorStyle_categorized__impl(SEXP c_arg__attribute, SEXP c_arg__valu
     return handle_result(res);
 }
 
+SEXP savvy_VectorStyle_continuous__impl(SEXP c_arg__attribute, SEXP c_arg__min, SEXP c_arg__max, SEXP c_arg__stop_offsets, SEXP c_arg__stop_r, SEXP c_arg__stop_g, SEXP c_arg__stop_b) {
+    SEXP res = savvy_VectorStyle_continuous__ffi(c_arg__attribute, c_arg__min, c_arg__max, c_arg__stop_offsets, c_arg__stop_r, c_arg__stop_g, c_arg__stop_b);
+    return handle_result(res);
+}
+
 SEXP savvy_VectorStyle_graduated__impl(SEXP c_arg__attribute, SEXP c_arg__classes, SEXP c_arg__min, SEXP c_arg__max, SEXP c_arg__stop_offsets, SEXP c_arg__stop_r, SEXP c_arg__stop_g, SEXP c_arg__stop_b) {
     SEXP res = savvy_VectorStyle_graduated__ffi(c_arg__attribute, c_arg__classes, c_arg__min, c_arg__max, c_arg__stop_offsets, c_arg__stop_r, c_arg__stop_g, c_arg__stop_b);
     return handle_result(res);
@@ -127,6 +132,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"savvy_RasterStyle_pseudocolor_discrete__impl", (DL_FUNC) &savvy_RasterStyle_pseudocolor_discrete__impl, 7},
     {"savvy_Rgb_new__impl", (DL_FUNC) &savvy_Rgb_new__impl, 3},
     {"savvy_VectorStyle_categorized__impl", (DL_FUNC) &savvy_VectorStyle_categorized__impl, 6},
+    {"savvy_VectorStyle_continuous__impl", (DL_FUNC) &savvy_VectorStyle_continuous__impl, 7},
     {"savvy_VectorStyle_graduated__impl", (DL_FUNC) &savvy_VectorStyle_graduated__impl, 8},
     {"savvy_VectorStyle_single__impl", (DL_FUNC) &savvy_VectorStyle_single__impl, 1},
     {NULL, NULL, 0}

@@ -293,6 +293,10 @@ class(`Rgb`) <- c("ggplot2qgis::Rgb__bundle", "savvy_ggplot2qgis__sealed")
 #'   `stop_offsets` are offsets in `0..=1` (the first must be `0` and the
 #'   last `1`), and `stop_r`/`stop_g`/`stop_b` are the corresponding color
 #'   channels.
+#' - `VectorStyle$continuous(attribute, min, max, stop_offsets, stop_r,
+#'   stop_g, stop_b)`: like graduated, but the color is interpolated
+#'   continuously (no binning) via a data-defined color expression. The
+#'   legend shows a single swatch.
 #' - `VectorStyle$categorized(attribute, values, colors_r, colors_g,
 #'   colors_b, catch_all)`: each discrete attribute value gets its own
 #'   color. `catch_all` is an optional `Rgb` for all other values.
@@ -305,6 +309,10 @@ class(`Rgb`) <- c("ggplot2qgis::Rgb__bundle", "savvy_ggplot2qgis__sealed")
 `VectorStyle`$`categorized` <- function(`attribute`, `values`, `colors_r`, `colors_g`, `colors_b`, `catch_all` = NULL) {
   `catch_all` <- .savvy_extract_ptr(`catch_all`, "ggplot2qgis::Rgb")
   .savvy_wrap_VectorStyle(.Call(savvy_VectorStyle_categorized__impl, `attribute`, `values`, `colors_r`, `colors_g`, `colors_b`, `catch_all`))
+}
+
+`VectorStyle`$`continuous` <- function(`attribute`, `min`, `max`, `stop_offsets`, `stop_r`, `stop_g`, `stop_b`) {
+  .savvy_wrap_VectorStyle(.Call(savvy_VectorStyle_continuous__impl, `attribute`, `min`, `max`, `stop_offsets`, `stop_r`, `stop_g`, `stop_b`))
 }
 
 `VectorStyle`$`graduated` <- function(`attribute`, `classes`, `min`, `max`, `stop_offsets`, `stop_r`, `stop_g`, `stop_b`) {

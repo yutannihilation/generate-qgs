@@ -17,5 +17,6 @@ SEXP savvy_Rgb_new__ffi(SEXP c_arg__r, SEXP c_arg__g, SEXP c_arg__b);
 
 // methods and associated functions for VectorStyle
 SEXP savvy_VectorStyle_categorized__ffi(SEXP c_arg__attribute, SEXP c_arg__values, SEXP c_arg__colors_r, SEXP c_arg__colors_g, SEXP c_arg__colors_b, SEXP c_arg__catch_all);
+SEXP savvy_VectorStyle_continuous__ffi(SEXP c_arg__attribute, SEXP c_arg__min, SEXP c_arg__max, SEXP c_arg__stop_offsets, SEXP c_arg__stop_r, SEXP c_arg__stop_g, SEXP c_arg__stop_b);
 SEXP savvy_VectorStyle_graduated__ffi(SEXP c_arg__attribute, SEXP c_arg__classes, SEXP c_arg__min, SEXP c_arg__max, SEXP c_arg__stop_offsets, SEXP c_arg__stop_r, SEXP c_arg__stop_g, SEXP c_arg__stop_b);
 SEXP savvy_VectorStyle_single__ffi(SEXP c_arg__color);

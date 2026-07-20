@@ -4,7 +4,12 @@
 \alias{write_qgs}
 \title{Write a ggplot2 map plot as a QGIS project}
 \usage{
-write_qgs(plot, path, use_plot_crs = FALSE)
+write_qgs(
+  plot,
+  path,
+  use_plot_crs = FALSE,
+  gradient_style = c("graduated", "continuous")
+)
 }
 \arguments{
 \item{plot}{A ggplot object. All layers must be backed by sf data.}
@@ -18,6 +23,21 @@ specified, otherwise the CRS of the first layer that defines one. If
 \code{FALSE} (the default), the project CRS is EPSG:3857 (Web Mercator).
 Either way the layers keep the CRS of their data; QGIS reprojects them
 on the fly.}
+
+\item{gradient_style}{How a continuous \code{fill}/\code{colour} scale is rendered:
+\itemize{
+\item \code{"graduated"} (the default): a graduated renderer with 25
+equal-interval classes. The gradient is slightly banded, but the
+legend shows the classes with their value ranges.
+\item \code{"continuous"}: the exact ggplot2 look. The color is interpolated
+per feature by a data-defined expression on the symbol color
+(\code{ramp_color(create_ramp(...), ...)}). Caveats: QGIS cannot display
+a color ramp in the legend for a data-defined color, so the legend
+is a single swatch without any value labels, and the gradient is
+only discoverable in the layer styling panel behind the
+data-defined override of the symbol color, not in the renderer
+dropdown.
+}}
 }
 \value{
 \code{path}, invisibly.
@@ -30,7 +50,9 @@ after the plot's trained color scale:
 }
 \details{
 \itemize{
-\item a continuous \code{fill}/\code{colour} scale becomes a graduated renderer,
+\item a continuous \code{fill}/\code{colour} scale becomes a graduated renderer with
+fine-grained equal-interval classes (or a continuously interpolated
+color, see \code{gradient_style}),
 \item a discrete one becomes a categorized renderer,
 \item a layer with no \code{fill}/\code{colour} mapping becomes a single symbol with
 the color ggplot2 would have used.

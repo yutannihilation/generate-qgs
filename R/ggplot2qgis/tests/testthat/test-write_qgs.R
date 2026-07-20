@@ -33,6 +33,12 @@ test_that("a continuous fill becomes a graduated style", {
   # nc.shp is in NAD27
   expect_match(out, "<authid>EPSG:4267</authid>", fixed = TRUE)
 
+  # Fine-grained classes to approximate the continuous gradient.
+  expect_length(
+    regmatches(out, gregexpr("<range ", out, fixed = TRUE))[[1]],
+    25L
+  )
+
   # The terminal gradient stops are the colors of the trained scale limits.
   b <- ggplot2::ggplot_build(p)
   s <- b@plot@scales$get_scales("fill")
@@ -57,6 +63,43 @@ test_that("the written gpkg keeps the raw data", {
   expect_equal(nrow(d), nrow(nc))
   expect_equal(d$AREA, nc$AREA)
   expect_equal(d$NAME, nc$NAME)
+})
+
+test_that("gradient_style = 'continuous' interpolates the color per feature", {
+  nc <- read_nc()
+  p <- ggplot2::ggplot(nc) +
+    ggplot2::geom_sf(ggplot2::aes(fill = AREA))
+
+  dir <- local_out_dir()
+  path <- file.path(dir, "proj.qgs")
+  write_qgs(p, path, gradient_style = "continuous")
+
+  out <- read_qgs(path)
+  # A single-symbol renderer whose fill is a data-defined expression
+  # interpolating the color from the attribute value.
+  expect_match(out, 'type="singleSymbol"', fixed = TRUE)
+  expect_no_match(out, 'type="graduatedSymbol"', fixed = TRUE)
+  expect_match(out, '<Option name="fillColor" type="Map">', fixed = TRUE)
+  expect_match(out, "ramp_color(create_ramp(map(", fixed = TRUE)
+  expect_match(out, "&quot;AREA&quot;", fixed = TRUE)
+
+  # The terminal gradient stops are the colors of the trained scale limits.
+  b <- ggplot2::ggplot_build(p)
+  s <- b@plot@scales$get_scales("fill")
+  ends <- tolower(s$map(s$get_limits()))
+  expect_match(out, paste0("0,'", ends[1L], "'"), fixed = TRUE)
+  expect_match(out, paste0("1,'", ends[2L], "'"), fixed = TRUE)
+})
+
+test_that("an unknown gradient_style is an error", {
+  nc <- read_nc()
+  p <- ggplot2::ggplot(nc) +
+    ggplot2::geom_sf(ggplot2::aes(fill = AREA))
+
+  expect_error(
+    write_qgs(p, tempfile(fileext = ".qgs"), gradient_style = "smooth"),
+    "'arg' should be one of"
+  )
 })
 
 test_that("a discrete fill becomes a categorized style", {
@@ -116,6 +159,7 @@ test_that("no fill/colour mapping becomes a single style", {
 
   out <- read_qgs(path)
   expect_match(out, 'type="singleSymbol"', fixed = TRUE)
+  expect_no_match(out, "ramp_color", fixed = TRUE)
 })
 
 test_that("each layer gets its own gpkg, bottom-most first", {

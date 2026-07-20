@@ -1,7 +1,14 @@
 # Number of equal-interval classes of a graduated renderer. QGIS classifies
 # the attribute into this many ranges; the colors are interpolated from the
-# gradient stops. Same default as the Rust demo.
-QGS_GRADUATED_CLASSES <- 6L
+# gradient stops. High enough to approximate ggplot2's continuous gradient,
+# at the cost of a long legend. (VectorStyle$continuous would reproduce the
+# gradient exactly, but QGIS shows no color ramp in the legend for it.)
+QGS_GRADUATED_CLASSES <- 25L
+
+# Number of gradient stops sampled from a continuous scale. QGIS
+# interpolates between stops in RGB space while ggplot2 interpolates in Lab
+# space, so sample densely enough that the difference is invisible.
+QGS_GRADIENT_STOPS <- 21L
 
 #' Write a ggplot2 map plot as a QGIS project
 #'
@@ -10,7 +17,9 @@ QGS_GRADUATED_CLASSES <- 6L
 #' GeoPackage under `<path minus extension>_data/`, and the layer is styled
 #' after the plot's trained color scale:
 #'
-#' - a continuous `fill`/`colour` scale becomes a graduated renderer,
+#' - a continuous `fill`/`colour` scale becomes a graduated renderer with
+#'   fine-grained equal-interval classes (or a continuously interpolated
+#'   color, see `gradient_style`),
 #' - a discrete one becomes a categorized renderer,
 #' - a layer with no `fill`/`colour` mapping becomes a single symbol with
 #'   the color ggplot2 would have used.
@@ -28,6 +37,19 @@ QGS_GRADUATED_CLASSES <- 6L
 #'   `FALSE` (the default), the project CRS is EPSG:3857 (Web Mercator).
 #'   Either way the layers keep the CRS of their data; QGIS reprojects them
 #'   on the fly.
+#' @param gradient_style How a continuous `fill`/`colour` scale is rendered:
+#'
+#'   - `"graduated"` (the default): a graduated renderer with 25
+#'     equal-interval classes. The gradient is slightly banded, but the
+#'     legend shows the classes with their value ranges.
+#'   - `"continuous"`: the exact ggplot2 look. The color is interpolated
+#'     per feature by a data-defined expression on the symbol color
+#'     (`ramp_color(create_ramp(...), ...)`). Caveats: QGIS cannot display
+#'     a color ramp in the legend for a data-defined color, so the legend
+#'     is a single swatch without any value labels, and the gradient is
+#'     only discoverable in the layer styling panel behind the
+#'     data-defined override of the symbol color, not in the renderer
+#'     dropdown.
 #' @returns `path`, invisibly.
 #' @examples
 #' library(ggplot2)
@@ -39,7 +61,8 @@ QGS_GRADUATED_CLASSES <- 6L
 #' write_qgs(p, tempfile(fileext = ".qgs"))
 #' @importFrom rlang %||%
 #' @export
-write_qgs <- function(plot, path, use_plot_crs = FALSE) {
+write_qgs <- function(plot, path, use_plot_crs = FALSE,
+                      gradient_style = c("graduated", "continuous")) {
   if (!inherits(plot, "ggplot")) {
     stop("`plot` must be a ggplot object, got ", class(plot)[1], call. = FALSE)
   }
@@ -50,6 +73,7 @@ write_qgs <- function(plot, path, use_plot_crs = FALSE) {
   if (!isTRUE(use_plot_crs) && !isFALSE(use_plot_crs)) {
     stop("`use_plot_crs` must be TRUE or FALSE", call. = FALSE)
   }
+  gradient_style <- match.arg(gradient_style)
 
   path <- path.expand(path)
 
@@ -117,7 +141,7 @@ write_qgs <- function(plot, path, use_plot_crs = FALSE) {
       layer_name,
       qgs_srs(crs),
       qgs_geometry_type(d, i),
-      qgs_vector_style(plot, built, layer, i, d)
+      qgs_vector_style(plot, built, layer, i, d, gradient_style)
     )
   }
 
@@ -153,7 +177,7 @@ qgs_geometry_type <- function(d, i) {
 # Resolves which aesthetic drives the color of the layer and returns the
 # matching VectorStyle. The layer's mapping takes precedence over the
 # plot's, following how ggplot2 itself resolves aesthetics.
-qgs_vector_style <- function(plot, built, layer, i, d) {
+qgs_vector_style <- function(plot, built, layer, i, d, gradient_style) {
   # aes() normalizes `color` to `colour`, so only these two keys exist.
   fill <- layer$mapping[["fill"]] %||% plot@mapping[["fill"]]
   colour <- layer$mapping[["colour"]] %||% plot@mapping[["colour"]]
@@ -186,6 +210,8 @@ qgs_vector_style <- function(plot, built, layer, i, d) {
   scale <- built@plot@scales$get_scales(aes_name)
   if (scale$is_discrete()) {
     qgs_categorized_style(scale, attribute, i)
+  } else if (gradient_style == "continuous") {
+    qgs_continuous_style(scale, attribute, i)
   } else {
     qgs_graduated_style(scale, attribute, i)
   }
@@ -204,7 +230,10 @@ qgs_single_style <- function(computed, i) {
   stop("layer ", i, ": cannot determine the color of the layer", call. = FALSE)
 }
 
-qgs_graduated_style <- function(scale, attribute, i) {
+# The gradient of a trained continuous scale, sampled at evenly spaced
+# points so QGIS reproduces ggplot2's gradient regardless of the scale's
+# palette.
+qgs_gradient_ramp <- function(scale, attribute, i) {
   limits <- scale$get_limits()
   if (anyNA(limits) || limits[2L] <= limits[1L]) {
     stop(
@@ -214,23 +243,41 @@ qgs_graduated_style <- function(scale, attribute, i) {
     )
   }
 
-  # Breaks outside the limits would be mapped to the na.value color, so
-  # keep only the inner ones; the limits themselves become the terminal
-  # gradient stops (offsets 0 and 1).
-  breaks <- scale$get_breaks()
-  breaks <- breaks[!is.na(breaks) & breaks > limits[1L] & breaks < limits[2L]]
-  stops <- c(limits[1L], sort(breaks), limits[2L])
-  colors <- grDevices::col2rgb(scale$map(stops))
+  offsets <- seq(0, 1, length.out = QGS_GRADIENT_STOPS)
+  values <- limits[1L] + offsets * (limits[2L] - limits[1L])
+  list(
+    limits = limits,
+    offsets = offsets,
+    colors = grDevices::col2rgb(scale$map(values))
+  )
+}
+
+qgs_graduated_style <- function(scale, attribute, i) {
+  ramp <- qgs_gradient_ramp(scale, attribute, i)
 
   VectorStyle$graduated(
     attribute,
     classes = QGS_GRADUATED_CLASSES,
-    min = limits[1L],
-    max = limits[2L],
-    stop_offsets = (stops - limits[1L]) / (limits[2L] - limits[1L]),
-    stop_r = colors["red", ],
-    stop_g = colors["green", ],
-    stop_b = colors["blue", ]
+    min = ramp$limits[1L],
+    max = ramp$limits[2L],
+    stop_offsets = ramp$offsets,
+    stop_r = ramp$colors["red", ],
+    stop_g = ramp$colors["green", ],
+    stop_b = ramp$colors["blue", ]
+  )
+}
+
+qgs_continuous_style <- function(scale, attribute, i) {
+  ramp <- qgs_gradient_ramp(scale, attribute, i)
+
+  VectorStyle$continuous(
+    attribute,
+    min = ramp$limits[1L],
+    max = ramp$limits[2L],
+    stop_offsets = ramp$offsets,
+    stop_r = ramp$colors["red", ],
+    stop_g = ramp$colors["green", ],
+    stop_b = ramp$colors["blue", ]
   )
 }
 

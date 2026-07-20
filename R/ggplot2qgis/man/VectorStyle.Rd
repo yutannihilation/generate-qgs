@@ -17,6 +17,9 @@ along a color gradient. The gradient is described by control points:
 \code{stop_offsets} are offsets in \verb{0..=1} (the first must be \code{0} and the
 last \code{1}), and \code{stop_r}/\code{stop_g}/\code{stop_b} are the corresponding color
 channels.
+\item \code{VectorStyle$continuous(attribute, min, max, stop_offsets, stop_r, stop_g, stop_b)}: like graduated, but the color is interpolated
+continuously (no binning) via a data-defined color expression. The
+legend shows a single swatch.
 \item \code{VectorStyle$categorized(attribute, values, colors_r, colors_g, colors_b, catch_all)}: each discrete attribute value gets its own
 color. \code{catch_all} is an optional \code{Rgb} for all other values.
 }

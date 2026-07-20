@@ -103,6 +103,9 @@ pub enum VectorStyle {
     /// Features are colored by an attribute value along a color gradient
     /// (like `samples/red.qgs`).
     Graduated(GraduatedStyle),
+    /// Features are colored by interpolating an attribute value along a
+    /// color gradient, without binning.
+    Continuous(ContinuousStyle),
     /// Each discrete attribute value gets its own color (like
     /// `samples/categorized.qgs`).
     Categorized(CategorizedStyle),
@@ -134,6 +137,29 @@ pub struct GraduatedStyle {
     /// Number of classes (>= 2).
     pub classes: usize,
     pub min: f64,
+    pub max: f64,
+    /// Gradient control points `(offset, color)`, sorted by offset;
+    /// the first must be at `0.0` and the last at `1.0`.
+    pub color_stops: Vec<(f64, Rgb)>,
+    pub outline_color: Rgb,
+    /// Stroke width in millimeters.
+    pub outline_width: f64,
+}
+
+/// Style for [`VectorStyle::Continuous`].
+///
+/// Rendered as a `singleSymbol` renderer whose symbol color is a
+/// data-defined expression interpolating `color_stops` over the attribute
+/// value — the vector counterpart of an `INTERPOLATED` raster ramp. The
+/// legend shows a single swatch (QGIS cannot draw a continuous legend for a
+/// data-defined vector color).
+#[derive(Debug, Clone)]
+pub struct ContinuousStyle {
+    /// Attribute (field) name to interpolate on.
+    pub attribute: String,
+    /// Attribute value mapped to offset `0.0` of the gradient.
+    pub min: f64,
+    /// Attribute value mapped to offset `1.0` of the gradient.
     pub max: f64,
     /// Gradient control points `(offset, color)`, sorted by offset;
     /// the first must be at `0.0` and the last at `1.0`.
@@ -421,6 +447,32 @@ impl VectorStyle {
         }))
     }
 
+    /// Continuous coloring of `attribute`: the color is interpolated along
+    /// `color_stops` from the attribute value rescaled so that `min` is at
+    /// offset `0.0` and `max` at `1.0` (values outside are clamped).
+    /// `color_stops` follows the same rules as [`VectorStyle::graduated`].
+    ///
+    /// Returns an error if `min >= max` or the color stops are invalid.
+    pub fn continuous(
+        attribute: impl Into<String>,
+        min: f64,
+        max: f64,
+        color_stops: &[(f64, Rgb)],
+    ) -> Result<Self, StyleError> {
+        if min >= max {
+            return Err(StyleError::InvalidRange { min, max });
+        }
+        validate_color_stops(color_stops)?;
+        Ok(VectorStyle::Continuous(ContinuousStyle {
+            attribute: attribute.into(),
+            min,
+            max,
+            color_stops: color_stops.to_vec(),
+            outline_color: Rgb::new(35, 35, 35),
+            outline_width: 0.26,
+        }))
+    }
+
     /// Graduated coloring of `attribute` with `classes` equal-interval
     /// ranges between `min` and `max`. Class colors are interpolated along
     /// `color_stops`, a list of `(offset, color)` control points with
@@ -452,13 +504,47 @@ impl VectorStyle {
 
 /// The recurring `<(data[-_]defined[-_]properties)>` boilerplate.
 fn write_data_defined_properties(w: &mut XmlWriter, tag: &str) {
+    write_data_defined_properties_with(w, tag, None);
+}
+
+/// Like [`write_data_defined_properties`], but with an optional
+/// `(property_name, expression)` override in the `properties` map.
+fn write_data_defined_properties_with(
+    w: &mut XmlWriter,
+    tag: &str,
+    property: Option<(&str, &str)>,
+) {
     w.start(tag);
     w.start("Option").attr("type", "Map");
     w.empty(
         "Option",
         &[("name", "name"), ("type", "QString"), ("value", "")],
     );
-    w.empty("Option", &[("name", "properties")]);
+    match property {
+        None => {
+            w.empty("Option", &[("name", "properties")]);
+        }
+        Some((name, expression)) => {
+            w.start("Option").attr("name", "properties").attr("type", "Map");
+            w.start("Option").attr("name", name).attr("type", "Map");
+            w.empty(
+                "Option",
+                &[("name", "active"), ("type", "bool"), ("value", "true")],
+            );
+            w.empty(
+                "Option",
+                &[
+                    ("name", "expression"),
+                    ("type", "QString"),
+                    ("value", expression),
+                ],
+            );
+            // 3 = expression-based property (QgsProperty::ExpressionBasedProperty).
+            w.empty("Option", &[("name", "type"), ("type", "int"), ("value", "3")]);
+            w.end(); // Option (property)
+            w.end(); // Option (properties)
+        }
+    }
     w.empty(
         "Option",
         &[
@@ -607,6 +693,32 @@ fn write_symbol(
     outline_color: Rgb,
     outline_width: f64,
 ) {
+    write_symbol_with_dd_color(w, name, geom, color, outline_color, outline_width, None);
+}
+
+/// The data-defined property that drives the main color of a symbol layer,
+/// as QGIS serializes it (`QgsSymbolLayer::propertyDefinitions()`).
+fn color_property_name(geom: GeometryType) -> &'static str {
+    match geom {
+        // SimpleMarker and SimpleFill color both map to PropertyFillColor.
+        GeometryType::Point | GeometryType::Polygon => "fillColor",
+        // SimpleLine color maps to PropertyStrokeColor.
+        GeometryType::LineString => "outlineColor",
+    }
+}
+
+/// Like [`write_symbol`], but the symbol layer's main color can carry a
+/// data-defined expression override.
+#[allow(clippy::too_many_arguments)]
+fn write_symbol_with_dd_color(
+    w: &mut XmlWriter,
+    name: &str,
+    geom: GeometryType,
+    color: Rgb,
+    outline_color: Rgb,
+    outline_width: f64,
+    color_expression: Option<&str>,
+) {
     let class = match geom {
         GeometryType::Point => "SimpleMarker",
         GeometryType::LineString => "SimpleLine",
@@ -635,9 +747,43 @@ fn write_symbol(
         );
     }
     w.end(); // Option
-    write_data_defined_properties(w, "data_defined_properties");
+    write_data_defined_properties_with(
+        w,
+        "data_defined_properties",
+        color_expression.map(|expr| (color_property_name(geom), expr)),
+    );
     w.end(); // layer
     w.end(); // symbol
+}
+
+/// Escapes a field name as a double-quoted QGIS expression identifier.
+fn quote_field(name: &str) -> String {
+    format!("\"{}\"", name.replace('"', "\"\""))
+}
+
+/// The `ramp_color(create_ramp(...), ...)` expression interpolating
+/// `color_stops` over the attribute value rescaled from `min..=max` to
+/// `0..=1`. `ramp_color()` clamps values outside the ramp.
+fn continuous_color_expression(
+    attribute: &str,
+    min: f64,
+    max: f64,
+    color_stops: &[(f64, Rgb)],
+) -> String {
+    let map_args = color_stops
+        .iter()
+        .map(|(offset, color)| format!("{},'{}'", g6(*offset), color.hex()))
+        .collect::<Vec<_>>()
+        .join(",");
+    // The span is spelled out as `max - min` so both numbers keep their
+    // exact user-facing form (subtracting in f64 first would leak noise
+    // like `0.19899999999999998` into the expression).
+    format!(
+        "ramp_color(create_ramp(map({map_args})),({field} - {min}) / ({max} - {min}))",
+        field = quote_field(attribute),
+        min = num(min),
+        max = num(max)
+    )
 }
 
 /// Writes the `<colorramp name="[source]" type="gradient">` element for the
@@ -700,6 +846,33 @@ pub(crate) fn write_renderer(w: &mut XmlWriter, geom: GeometryType, style: &Vect
                 .attr("type", "singleSymbol");
             w.start("symbols");
             write_symbol(w, "0", geom, s.color, s.outline_color, s.outline_width);
+            w.end(); // symbols
+            w.empty("rotation", &[]);
+            w.empty("sizescale", &[]);
+            write_data_defined_properties(w, "data-defined-properties");
+            w.end(); // renderer-v2
+        }
+        VectorStyle::Continuous(c) => {
+            let expression =
+                continuous_color_expression(&c.attribute, c.min, c.max, &c.color_stops);
+            w.start("renderer-v2")
+                .attr("enableorderby", "0")
+                .attr("forceraster", "0")
+                .attr("referencescale", "-1")
+                .attr("symbollevels", "0")
+                .attr("type", "singleSymbol");
+            w.start("symbols");
+            // The static color (also the legend swatch) is the middle of
+            // the ramp; per feature it is overridden by the expression.
+            write_symbol_with_dd_color(
+                w,
+                "0",
+                geom,
+                sample_ramp(&c.color_stops, 0.5),
+                c.outline_color,
+                c.outline_width,
+                Some(&expression),
+            );
             w.end(); // symbols
             w.empty("rotation", &[]);
             w.empty("sizescale", &[]);
@@ -1155,6 +1328,73 @@ mod tests {
         assert!(out.contains("255,255,255,255,rgb:1,1,1,1"));
         assert!(out.contains("255,252,252,255,rgb:1,0.9882353,0.9882353,1"));
         assert!(out.contains("255,0,0,255,rgb:1,0,0,1"));
+    }
+
+    #[test]
+    fn continuous_renderer_structure() {
+        let style = VectorStyle::continuous(
+            "AREA",
+            0.042,
+            0.241,
+            &[
+                (0.0, Rgb::new(19, 43, 67)),
+                (0.5, Rgb::new(45, 96, 141)),
+                (1.0, Rgb::new(86, 177, 247)),
+            ],
+        )
+        .unwrap();
+        let mut w = XmlWriter::new(0);
+        write_renderer(&mut w, GeometryType::Polygon, &style);
+        let out = w.finish();
+
+        assert!(out.contains("type=\"singleSymbol\""));
+        // The fill color is driven by a data-defined expression...
+        assert!(out.contains("<Option name=\"fillColor\" type=\"Map\">"));
+        assert!(out.contains("name=\"active\" type=\"bool\" value=\"true\""));
+        assert!(out.contains("name=\"type\" type=\"int\" value=\"3\""));
+        // ...that interpolates the inline ramp over the rescaled attribute.
+        let expr = "ramp_color(create_ramp(map(0,'#132b43',0.5,'#2d608d',1,'#56b1f7')),\
+                    (&quot;AREA&quot; - 0.042) / (0.241 - 0.042))";
+        assert!(out.contains(expr), "expression not found in:\n{out}");
+        // The static color is the middle of the ramp.
+        assert!(out.contains("45,96,141,255,rgb:"));
+    }
+
+    #[test]
+    fn continuous_line_color_is_data_defined_stroke() {
+        let style = VectorStyle::continuous(
+            "x",
+            0.0,
+            1.0,
+            &[(0.0, Rgb::new(0, 0, 0)), (1.0, Rgb::new(255, 255, 255))],
+        )
+        .unwrap();
+        let mut w = XmlWriter::new(0);
+        write_renderer(&mut w, GeometryType::LineString, &style);
+        let out = w.finish();
+        // SimpleLine's color is its stroke, so the override targets
+        // outlineColor rather than fillColor.
+        assert!(out.contains("<Option name=\"outlineColor\" type=\"Map\">"));
+        assert!(!out.contains("<Option name=\"fillColor\""));
+    }
+
+    #[test]
+    fn continuous_field_names_are_escaped() {
+        assert_eq!(quote_field("AREA"), "\"AREA\"");
+        assert_eq!(quote_field("odd\"name"), "\"odd\"\"name\"");
+    }
+
+    #[test]
+    fn invalid_continuous_styles_are_errors() {
+        let ramp = [(0.0, Rgb::new(0, 0, 0)), (1.0, Rgb::new(255, 255, 255))];
+        assert!(matches!(
+            VectorStyle::continuous("x", 1.0, 1.0, &ramp),
+            Err(StyleError::InvalidRange { .. })
+        ));
+        assert!(matches!(
+            VectorStyle::continuous("x", 0.0, 1.0, &ramp[..1]),
+            Err(StyleError::TooFewColorStops(1))
+        ));
     }
 
     #[test]
