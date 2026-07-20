@@ -3,6 +3,9 @@ Generate QGIS project (`.qgs`) files programmatically
 
 A Rust crate for generating QGIS project (`.qgs`) files programmatically.
 
+> [!NOTE]
+> The R implementation (the `ggplot2qgis` package, formerly in `R/`) has moved to its own repository: <https://github.com/yutannihilation/ggplot2qgis>.
+
 ## Usage
 
 ```rust
