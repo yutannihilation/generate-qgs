@@ -151,23 +151,11 @@ project_crs_block <- function(out) {
   substr(out, start, end)
 }
 
-test_that("the project CRS comes from the first layer with a CRS", {
-  nc <- read_nc()
-  p <- ggplot2::ggplot(nc) +
-    ggplot2::geom_sf(ggplot2::aes(fill = AREA))
-
-  dir <- local_out_dir()
-  path <- file.path(dir, "proj.qgs")
-  write_qgs(p, path)
-
-  block <- project_crs_block(read_qgs(path))
-  expect_match(block, "<authid>EPSG:4267</authid>", fixed = TRUE)
-})
-
-test_that("the crs argument of coord_sf() wins as the project CRS", {
+test_that("the project CRS defaults to EPSG:3857", {
   nc <- read_nc()
   p <- ggplot2::ggplot(nc) +
     ggplot2::geom_sf(ggplot2::aes(fill = AREA)) +
+    # coord_sf() does not affect the project CRS
     ggplot2::coord_sf(crs = 4326)
 
   dir <- local_out_dir()
@@ -175,9 +163,62 @@ test_that("the crs argument of coord_sf() wins as the project CRS", {
   write_qgs(p, path)
 
   block <- project_crs_block(read_qgs(path))
+  expect_match(block, "<authid>EPSG:3857</authid>", fixed = TRUE)
+  # The layer itself keeps the CRS of its data.
+  expect_match(read_qgs(path), "<authid>EPSG:4267</authid>", fixed = TRUE)
+})
+
+test_that("use_plot_crs = TRUE takes the CRS of the first layer", {
+  nc <- read_nc()
+  p <- ggplot2::ggplot(nc) +
+    ggplot2::geom_sf(ggplot2::aes(fill = AREA))
+
+  dir <- local_out_dir()
+  path <- file.path(dir, "proj.qgs")
+  write_qgs(p, path, use_plot_crs = TRUE)
+
+  block <- project_crs_block(read_qgs(path))
+  expect_match(block, "<authid>EPSG:4267</authid>", fixed = TRUE)
+})
+
+test_that("use_plot_crs = TRUE respects the crs argument of coord_sf()", {
+  nc <- read_nc()
+  p <- ggplot2::ggplot(nc) +
+    ggplot2::geom_sf(ggplot2::aes(fill = AREA)) +
+    ggplot2::coord_sf(crs = 4326)
+
+  dir <- local_out_dir()
+  path <- file.path(dir, "proj.qgs")
+  write_qgs(p, path, use_plot_crs = TRUE)
+
+  block <- project_crs_block(read_qgs(path))
   expect_match(block, "<authid>EPSG:4326</authid>", fixed = TRUE)
   # The layer itself keeps its own CRS; QGIS reprojects on the fly.
   expect_match(read_qgs(path), "<authid>EPSG:4267</authid>", fixed = TRUE)
+})
+
+test_that("a non-logical use_plot_crs is an error", {
+  nc <- read_nc()
+  p <- ggplot2::ggplot(nc) +
+    ggplot2::geom_sf(ggplot2::aes(fill = AREA))
+
+  path <- tempfile(fileext = ".qgs")
+  expect_error(write_qgs(p, path, use_plot_crs = NA), "TRUE or FALSE")
+  expect_error(write_qgs(p, path, use_plot_crs = "yes"), "TRUE or FALSE")
+})
+
+test_that("a tilde in the output path is expanded", {
+  nc <- read_nc()
+  p <- ggplot2::ggplot(nc) +
+    ggplot2::geom_sf(ggplot2::aes(fill = AREA))
+
+  dir <- local_out_dir()
+  withr::local_envvar(HOME = dir)
+
+  write_qgs(p, "~/proj.qgs")
+
+  expect_true(file.exists(file.path(dir, "proj.qgs")))
+  expect_true(file.exists(file.path(dir, "proj_data", "layer1.gpkg")))
 })
 
 test_that("non-sf data is an error", {

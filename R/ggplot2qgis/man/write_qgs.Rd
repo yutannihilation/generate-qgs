@@ -4,12 +4,20 @@
 \alias{write_qgs}
 \title{Write a ggplot2 map plot as a QGIS project}
 \usage{
-write_qgs(plot, path)
+write_qgs(plot, path, use_plot_crs = FALSE)
 }
 \arguments{
 \item{plot}{A ggplot object. All layers must be backed by sf data.}
 
-\item{path}{Path of the \code{.qgs} file to write.}
+\item{path}{Path of the \code{.qgs} file to write. Tilde paths (e.g. \verb{~/x.qgs})
+are expanded.}
+
+\item{use_plot_crs}{If \code{TRUE}, the project (map canvas) CRS is the plot's
+CRS, resolved the way \code{\link[ggplot2:coord_sf]{ggplot2::coord_sf()}} does: its \code{crs} argument if
+specified, otherwise the CRS of the first layer that defines one. If
+\code{FALSE} (the default), the project CRS is EPSG:3857 (Web Mercator).
+Either way the layers keep the CRS of their data; QGIS reprojects them
+on the fly.}
 }
 \value{
 \code{path}, invisibly.
@@ -31,11 +39,6 @@ the color ggplot2 would have used.
 Only a bare column name is supported for the \code{fill}/\code{colour} aesthetics;
 a constant or a computed expression (e.g. \code{aes(fill = AREA * 2)}) is an
 error.
-
-The CRS of the project follows \code{\link[ggplot2:coord_sf]{ggplot2::coord_sf()}}: the \code{crs} argument
-of \code{coord_sf()} if specified, otherwise the CRS of the first layer that
-defines one. Layers in a different CRS are reprojected on the fly by
-QGIS, just like \code{coord_sf()} transforms them for display.
 }
 \examples{
 library(ggplot2)

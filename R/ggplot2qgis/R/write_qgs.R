@@ -19,13 +19,15 @@ QGS_GRADUATED_CLASSES <- 6L
 #' a constant or a computed expression (e.g. `aes(fill = AREA * 2)`) is an
 #' error.
 #'
-#' The CRS of the project follows [ggplot2::coord_sf()]: the `crs` argument
-#' of `coord_sf()` if specified, otherwise the CRS of the first layer that
-#' defines one. Layers in a different CRS are reprojected on the fly by
-#' QGIS, just like `coord_sf()` transforms them for display.
-#'
 #' @param plot A ggplot object. All layers must be backed by sf data.
-#' @param path Path of the `.qgs` file to write.
+#' @param path Path of the `.qgs` file to write. Tilde paths (e.g. `~/x.qgs`)
+#'   are expanded.
+#' @param use_plot_crs If `TRUE`, the project (map canvas) CRS is the plot's
+#'   CRS, resolved the way [ggplot2::coord_sf()] does: its `crs` argument if
+#'   specified, otherwise the CRS of the first layer that defines one. If
+#'   `FALSE` (the default), the project CRS is EPSG:3857 (Web Mercator).
+#'   Either way the layers keep the CRS of their data; QGIS reprojects them
+#'   on the fly.
 #' @returns `path`, invisibly.
 #' @examples
 #' library(ggplot2)
@@ -37,7 +39,7 @@ QGS_GRADUATED_CLASSES <- 6L
 #' write_qgs(p, tempfile(fileext = ".qgs"))
 #' @importFrom rlang %||%
 #' @export
-write_qgs <- function(plot, path) {
+write_qgs <- function(plot, path, use_plot_crs = FALSE) {
   if (!inherits(plot, "ggplot")) {
     stop("`plot` must be a ggplot object, got ", class(plot)[1], call. = FALSE)
   }
@@ -45,6 +47,11 @@ write_qgs <- function(plot, path) {
   if (length(layers) == 0L) {
     stop("`plot` must have at least one layer", call. = FALSE)
   }
+  if (!isTRUE(use_plot_crs) && !isFALSE(use_plot_crs)) {
+    stop("`use_plot_crs` must be TRUE or FALSE", call. = FALSE)
+  }
+
+  path <- path.expand(path)
 
   # Build the plot first so that the scales are trained by the data.
   built <- ggplot2::ggplot_build(plot)
@@ -55,12 +62,15 @@ write_qgs <- function(plot, path) {
 
   builder <- QgsBuilder$new()
 
-  # coord_sf() uses the crs argument if specified, otherwise the CRS of
+  # coord_sf() uses its crs argument if specified, otherwise the CRS of
   # the first layer that defines one; the built plot carries the result
   # (as given, so e.g. a bare EPSG code needs normalization).
-  project_crs <- built@layout$panel_params[[1]]$crs
-  if (!is.null(project_crs)) {
-    project_crs <- sf::st_crs(project_crs)
+  plot_crs <- NULL
+  if (use_plot_crs) {
+    plot_crs <- built@layout$panel_params[[1]]$crs
+    if (!is.null(plot_crs)) {
+      plot_crs <- sf::st_crs(plot_crs)
+    }
   }
 
   # ggplot2's first layer is the bottom-most one, which is also the order
@@ -89,8 +99,8 @@ write_qgs <- function(plot, path) {
     if (is.na(crs)) {
       stop("layer ", i, ": the data has no CRS", call. = FALSE)
     }
-    if (is.null(project_crs) || is.na(project_crs)) {
-      project_crs <- crs
+    if (use_plot_crs && (is.null(plot_crs) || is.na(plot_crs))) {
+      plot_crs <- crs
     }
 
     layer_name <- paste0("layer", i)
@@ -111,7 +121,9 @@ write_qgs <- function(plot, path) {
     )
   }
 
-  builder$set_project_crs(qgs_srs(project_crs))
+  if (use_plot_crs) {
+    builder$set_project_crs(qgs_srs(plot_crs))
+  }
   builder$write_to(path)
 
   invisible(path)
