@@ -25,6 +25,14 @@ impl QgsBuilder {
         }
     }
 
+    /// Sets the project CRS, i.e. the CRS of the map canvas. Layers whose
+    /// SRS differs are reprojected on the fly by QGIS. If not set, the
+    /// default is EPSG:3857. `srs` is either an EPSG code or a WKT2 string.
+    fn set_project_crs(&mut self, srs: Sexp) -> savvy::Result<()> {
+        self.inner.set_project_crs(parse_srs(srs)?)?;
+        Ok(())
+    }
+
     /// Adds an XYZ tile layer (e.g. OpenStreetMap-like tiles). The `url`
     /// should contain `{z}`/`{x}`/`{y}` placeholders. XYZ tiles are always
     /// in EPSG:3857.

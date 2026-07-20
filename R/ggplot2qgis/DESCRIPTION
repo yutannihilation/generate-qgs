@@ -12,8 +12,15 @@ License: `use_mit_license()`, `use_gpl3_license()` or friends to pick a
     license
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 7.3.3
 SystemRequirements: Cargo (Rust's package manager), rustc
-Suggests: 
-    testthat (>= 3.0.0)
+Imports:
+    ggplot2 (>= 4.0.0),
+    grDevices,
+    rlang,
+    sf,
+    tools
+Suggests:
+    testthat (>= 3.0.0),
+    withr
 Config/testthat/edition: 3
+Config/roxygen2/version: 8.0.0

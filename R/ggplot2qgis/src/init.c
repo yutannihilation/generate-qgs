@@ -66,6 +66,11 @@ SEXP savvy_QgsBuilder_new__impl(void) {
     return handle_result(res);
 }
 
+SEXP savvy_QgsBuilder_set_project_crs__impl(SEXP self__, SEXP c_arg__srs) {
+    SEXP res = savvy_QgsBuilder_set_project_crs__ffi(self__, c_arg__srs);
+    return handle_result(res);
+}
+
 SEXP savvy_QgsBuilder_write_to__impl(SEXP self__, SEXP c_arg__path) {
     SEXP res = savvy_QgsBuilder_write_to__ffi(self__, c_arg__path);
     return handle_result(res);
@@ -96,6 +101,11 @@ SEXP savvy_VectorStyle_categorized__impl(SEXP c_arg__attribute, SEXP c_arg__valu
     return handle_result(res);
 }
 
+SEXP savvy_VectorStyle_continuous__impl(SEXP c_arg__attribute, SEXP c_arg__min, SEXP c_arg__max, SEXP c_arg__stop_offsets, SEXP c_arg__stop_r, SEXP c_arg__stop_g, SEXP c_arg__stop_b) {
+    SEXP res = savvy_VectorStyle_continuous__ffi(c_arg__attribute, c_arg__min, c_arg__max, c_arg__stop_offsets, c_arg__stop_r, c_arg__stop_g, c_arg__stop_b);
+    return handle_result(res);
+}
+
 SEXP savvy_VectorStyle_graduated__impl(SEXP c_arg__attribute, SEXP c_arg__classes, SEXP c_arg__min, SEXP c_arg__max, SEXP c_arg__stop_offsets, SEXP c_arg__stop_r, SEXP c_arg__stop_g, SEXP c_arg__stop_b) {
     SEXP res = savvy_VectorStyle_graduated__ffi(c_arg__attribute, c_arg__classes, c_arg__min, c_arg__max, c_arg__stop_offsets, c_arg__stop_r, c_arg__stop_g, c_arg__stop_b);
     return handle_result(res);
@@ -115,12 +125,14 @@ static const R_CallMethodDef CallEntries[] = {
     {"savvy_QgsBuilder_add_xyz_tile_layer__impl", (DL_FUNC) &savvy_QgsBuilder_add_xyz_tile_layer__impl, 5},
     {"savvy_QgsBuilder_build__impl", (DL_FUNC) &savvy_QgsBuilder_build__impl, 1},
     {"savvy_QgsBuilder_new__impl", (DL_FUNC) &savvy_QgsBuilder_new__impl, 0},
+    {"savvy_QgsBuilder_set_project_crs__impl", (DL_FUNC) &savvy_QgsBuilder_set_project_crs__impl, 2},
     {"savvy_QgsBuilder_write_to__impl", (DL_FUNC) &savvy_QgsBuilder_write_to__impl, 2},
     {"savvy_RasterStyle_multiband__impl", (DL_FUNC) &savvy_RasterStyle_multiband__impl, 9},
     {"savvy_RasterStyle_pseudocolor__impl", (DL_FUNC) &savvy_RasterStyle_pseudocolor__impl, 7},
     {"savvy_RasterStyle_pseudocolor_discrete__impl", (DL_FUNC) &savvy_RasterStyle_pseudocolor_discrete__impl, 7},
     {"savvy_Rgb_new__impl", (DL_FUNC) &savvy_Rgb_new__impl, 3},
     {"savvy_VectorStyle_categorized__impl", (DL_FUNC) &savvy_VectorStyle_categorized__impl, 6},
+    {"savvy_VectorStyle_continuous__impl", (DL_FUNC) &savvy_VectorStyle_continuous__impl, 7},
     {"savvy_VectorStyle_graduated__impl", (DL_FUNC) &savvy_VectorStyle_graduated__impl, 8},
     {"savvy_VectorStyle_single__impl", (DL_FUNC) &savvy_VectorStyle_single__impl, 1},
     {NULL, NULL, 0}

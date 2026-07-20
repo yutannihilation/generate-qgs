@@ -133,6 +133,12 @@ class(`GeometryType`) <- c("ggplot2qgis::GeometryType__bundle", "savvy_ggplot2qg
   }
 }
 
+`QgsBuilder_set_project_crs` <- function(self) {
+  function(`srs`) {
+    invisible(.Call(savvy_QgsBuilder_set_project_crs__impl, `self`, `srs`))
+  }
+}
+
 `QgsBuilder_write_to` <- function(self) {
   function(`path`) {
     invisible(.Call(savvy_QgsBuilder_write_to__impl, `self`, `path`))
@@ -146,6 +152,7 @@ class(`GeometryType`) <- c("ggplot2qgis::GeometryType__bundle", "savvy_ggplot2qg
   e$`add_vector_layer` <- `QgsBuilder_add_vector_layer`(ptr)
   e$`add_xyz_tile_layer` <- `QgsBuilder_add_xyz_tile_layer`(ptr)
   e$`build` <- `QgsBuilder_build`(ptr)
+  e$`set_project_crs` <- `QgsBuilder_set_project_crs`(ptr)
   e$`write_to` <- `QgsBuilder_write_to`(ptr)
 
   class(e) <- c("ggplot2qgis::QgsBuilder", "QgsBuilder", "savvy_ggplot2qgis__sealed")
@@ -286,6 +293,10 @@ class(`Rgb`) <- c("ggplot2qgis::Rgb__bundle", "savvy_ggplot2qgis__sealed")
 #'   `stop_offsets` are offsets in `0..=1` (the first must be `0` and the
 #'   last `1`), and `stop_r`/`stop_g`/`stop_b` are the corresponding color
 #'   channels.
+#' - `VectorStyle$continuous(attribute, min, max, stop_offsets, stop_r,
+#'   stop_g, stop_b)`: like graduated, but the color is interpolated
+#'   continuously (no binning) via a data-defined color expression. The
+#'   legend shows a single swatch.
 #' - `VectorStyle$categorized(attribute, values, colors_r, colors_g,
 #'   colors_b, catch_all)`: each discrete attribute value gets its own
 #'   color. `catch_all` is an optional `Rgb` for all other values.
@@ -298,6 +309,10 @@ class(`Rgb`) <- c("ggplot2qgis::Rgb__bundle", "savvy_ggplot2qgis__sealed")
 `VectorStyle`$`categorized` <- function(`attribute`, `values`, `colors_r`, `colors_g`, `colors_b`, `catch_all` = NULL) {
   `catch_all` <- .savvy_extract_ptr(`catch_all`, "ggplot2qgis::Rgb")
   .savvy_wrap_VectorStyle(.Call(savvy_VectorStyle_categorized__impl, `attribute`, `values`, `colors_r`, `colors_g`, `colors_b`, `catch_all`))
+}
+
+`VectorStyle`$`continuous` <- function(`attribute`, `min`, `max`, `stop_offsets`, `stop_r`, `stop_g`, `stop_b`) {
+  .savvy_wrap_VectorStyle(.Call(savvy_VectorStyle_continuous__impl, `attribute`, `min`, `max`, `stop_offsets`, `stop_r`, `stop_g`, `stop_b`))
 }
 
 `VectorStyle`$`graduated` <- function(`attribute`, `classes`, `min`, `max`, `stop_offsets`, `stop_r`, `stop_g`, `stop_b`) {

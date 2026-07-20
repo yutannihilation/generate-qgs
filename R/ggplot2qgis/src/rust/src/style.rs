@@ -62,6 +62,10 @@ impl From<&GeometryType> for generate_qgs::GeometryType {
 ///   `stop_offsets` are offsets in `0..=1` (the first must be `0` and the
 ///   last `1`), and `stop_r`/`stop_g`/`stop_b` are the corresponding color
 ///   channels.
+/// - `VectorStyle$continuous(attribute, min, max, stop_offsets, stop_r,
+///   stop_g, stop_b)`: like graduated, but the color is interpolated
+///   continuously (no binning) via a data-defined color expression. The
+///   legend shows a single swatch.
 /// - `VectorStyle$categorized(attribute, values, colors_r, colors_g,
 ///   colors_b, catch_all)`: each discrete attribute value gets its own
 ///   color. `catch_all` is an optional `Rgb` for all other values.
@@ -103,6 +107,24 @@ impl VectorStyle {
             max,
             &stops,
         )?;
+        Ok(Self { inner })
+    }
+
+    /// Continuous coloring of `attribute`: the color is interpolated along
+    /// the color stops from the attribute value rescaled so that `min` is
+    /// at offset `0` and `max` at `1` (values outside are clamped). Unlike
+    /// `graduated`, there is no binning; the legend shows a single swatch.
+    fn continuous(
+        attribute: &str,
+        min: f64,
+        max: f64,
+        stop_offsets: RealSexp,
+        stop_r: IntegerSexp,
+        stop_g: IntegerSexp,
+        stop_b: IntegerSexp,
+    ) -> savvy::Result<Self> {
+        let stops = color_stops(&stop_offsets, &stop_r, &stop_g, &stop_b)?;
+        let inner = generate_qgs::VectorStyle::continuous(attribute, min, max, &stops)?;
         Ok(Self { inner })
     }
 
