@@ -39,6 +39,11 @@ test_that("a continuous fill becomes a graduated style", {
     25L
   )
 
+  # The label precision follows the class width, so narrow classes don't
+  # collapse into duplicate labels like "0.1 - 0.1".
+  expect_match(out, 'label="0.042 - 0.05"', fixed = TRUE)
+  expect_match(out, 'labelprecision="3"', fixed = TRUE)
+
   # The terminal gradient stops are the colors of the trained scale limits.
   b <- ggplot2::ggplot_build(p)
   s <- b@plot@scales$get_scales("fill")

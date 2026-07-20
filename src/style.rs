@@ -823,14 +823,24 @@ fn write_gradient_colorramp(w: &mut XmlWriter, start: Rgb, end: Rgb, stops: &[(f
     w.end(); // colorramp
 }
 
-/// Label for a graduated range, following the
-/// `<labelFormat format="%1 - %2" labelprecision="1" trimtrailingzeroes="1"/>`
-/// convention (e.g. `0 - 10`, `9.5 - 19`).
-fn range_label(lower: f64, upper: f64) -> String {
-    fn bound(v: f64) -> String {
-        let s = format!("{v:.1}");
-        s.trim_end_matches('0').trim_end_matches('.').to_string()
+/// Number of label decimals needed to tell adjacent class bounds apart:
+/// the smallest `p` with `10^-p <= step / 2`, at least 1 (the QGIS
+/// default, kept for wide classes so the output matches the samples).
+fn label_precision(step: f64) -> usize {
+    if !step.is_finite() || step <= 0.0 {
+        return 1;
     }
+    (2.0 / step).log10().ceil().clamp(1.0, 15.0) as usize
+}
+
+/// Label for a graduated range, following the
+/// `<labelFormat format="%1 - %2" labelprecision="N" trimtrailingzeroes="1"/>`
+/// convention (e.g. `0 - 10`, `9.5 - 19`, `0.042 - 0.05`).
+fn range_label(lower: f64, upper: f64, precision: usize) -> String {
+    let bound = |v: f64| {
+        let s = format!("{v:.precision$}");
+        s.trim_end_matches('0').trim_end_matches('.').to_string()
+    };
     format!("{} - {}", bound(lower), bound(upper))
 }
 
@@ -881,6 +891,7 @@ pub(crate) fn write_renderer(w: &mut XmlWriter, geom: GeometryType, style: &Vect
         }
         VectorStyle::Graduated(g) => {
             let step = (g.max - g.min) / g.classes as f64;
+            let precision = label_precision(step);
             w.start("renderer-v2")
                 .attr("attr", &g.attribute)
                 .attr("enableorderby", "0")
@@ -894,7 +905,7 @@ pub(crate) fn write_renderer(w: &mut XmlWriter, geom: GeometryType, style: &Vect
                 let lower = g.min + step * i as f64;
                 let upper = lower + step;
                 w.start("range")
-                    .attr("label", range_label(lower, upper))
+                    .attr("label", range_label(lower, upper, precision))
                     .attr("lower", format!("{lower:.15}"))
                     .attr("render", "true")
                     .attr("symbol", i.to_string())
@@ -942,7 +953,7 @@ pub(crate) fn write_renderer(w: &mut XmlWriter, geom: GeometryType, style: &Vect
                 "labelFormat",
                 &[
                     ("format", "%1 - %2"),
-                    ("labelprecision", "1"),
+                    ("labelprecision", &precision.to_string()),
                     ("trimtrailingzeroes", "1"),
                 ],
             );
@@ -1288,8 +1299,54 @@ mod tests {
 
     #[test]
     fn labels() {
-        assert_eq!(range_label(0.0, 10.0), "0 - 10");
-        assert_eq!(range_label(9.5, 19.0), "9.5 - 19");
+        assert_eq!(range_label(0.0, 10.0, 1), "0 - 10");
+        assert_eq!(range_label(9.5, 19.0, 1), "9.5 - 19");
+        assert_eq!(range_label(0.042, 0.04996, 3), "0.042 - 0.05");
+    }
+
+    #[test]
+    fn label_precision_scales_with_class_width() {
+        // Wide classes keep the QGIS default of one decimal.
+        assert_eq!(label_precision(9.5), 1);
+        assert_eq!(label_precision(2.0), 1);
+        assert_eq!(label_precision(0.5), 1);
+        // Narrow classes get enough decimals to stay distinguishable.
+        assert_eq!(label_precision(0.05), 2);
+        assert_eq!(label_precision(0.00796), 3);
+        assert_eq!(label_precision(0.0005), 4);
+        // Degenerate steps fall back to the default.
+        assert_eq!(label_precision(0.0), 1);
+        assert_eq!(label_precision(f64::NAN), 1);
+    }
+
+    #[test]
+    fn narrow_classes_get_distinguishable_labels() {
+        // The nc AREA case: 25 classes over 0.042..0.241 used to produce
+        // duplicate labels like "0.1 - 0.1".
+        let style = VectorStyle::graduated(
+            "AREA",
+            25,
+            0.042,
+            0.241,
+            &[(0.0, Rgb::new(0, 0, 0)), (1.0, Rgb::new(255, 255, 255))],
+        )
+        .unwrap();
+        let mut w = XmlWriter::new(0);
+        write_renderer(&mut w, GeometryType::Polygon, &style);
+        let out = w.finish();
+
+        assert!(out.contains("label=\"0.042 - 0.05\""));
+        assert!(out.contains("label=\"0.05 - 0.058\""));
+        assert!(out.contains("labelprecision=\"3\""));
+        // No range collapses into an empty "x - x" label.
+        for label in out
+            .split("label=\"")
+            .skip(1)
+            .filter_map(|s| s.split('"').next())
+        {
+            let (lower, upper) = label.split_once(" - ").expect("range label");
+            assert_ne!(lower, upper, "duplicate bounds in label {label:?}");
+        }
     }
 
     #[test]
