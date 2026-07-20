@@ -58,6 +58,12 @@ color, see \code{gradient_style}),
 the color ggplot2 would have used.
 }
 
+Following ggplot2's semantics for polygons, \code{fill} is the interior and
+\code{colour} is the border: a \code{colour} scale on a polygon layer colors the
+outlines while the interior keeps the constant fill. Constant outline
+colors and widths are taken from the plot as well. Mapping both \code{fill}
+and \code{colour} on the same layer is not supported.
+
 Only a bare column name is supported for the \code{fill}/\code{colour} aesthetics;
 a constant or a computed expression (e.g. \code{aes(fill = AREA * 2)}) is an
 error.

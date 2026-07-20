@@ -70,6 +70,14 @@ impl From<&GeometryType> for generate_qgs::GeometryType {
 ///   colors_b, catch_all)`: each discrete attribute value gets its own
 ///   color. `catch_all` is an optional `Rgb` for all other values.
 ///
+/// A style can be adjusted in place after construction:
+///
+/// - `$set_outline(color, width)`: the constant outline (stroke) color
+///   and width in millimeters (defaults: dark gray, 0.26).
+/// - `$set_stroke_target(fill_color)`: moves the varying color of a
+///   graduated/continuous/categorized style to the outline; all features
+///   share the constant `fill_color`. Errors on a single style.
+///
 /// @export
 #[savvy]
 struct VectorStyle {
@@ -84,6 +92,22 @@ impl VectorStyle {
         Self {
             inner: generate_qgs::VectorStyle::single(color.inner),
         }
+    }
+
+    /// Sets the constant outline (stroke) color and width in millimeters.
+    /// For a style whose varying color targets the stroke, the width
+    /// still applies but the color is ignored.
+    fn set_outline(&mut self, color: &Rgb, width: f64) -> savvy::Result<()> {
+        self.inner.set_outline(color.inner, width);
+        Ok(())
+    }
+
+    /// Moves the varying color of a graduated, continuous, or categorized
+    /// style to the outline (stroke); every feature shares the constant
+    /// `fill_color`. Errors on a single-symbol style.
+    fn set_stroke_target(&mut self, fill_color: &Rgb) -> savvy::Result<()> {
+        self.inner.set_stroke_target(fill_color.inner)?;
+        Ok(())
     }
 
     /// Graduated coloring of `attribute` with `classes` equal-interval

@@ -10,6 +10,10 @@ QGS_GRADUATED_CLASSES <- 25L
 # space, so sample densely enough that the difference is invisible.
 QGS_GRADIENT_STOPS <- 21L
 
+# Millimeters per ggplot2 linewidth unit: 1 linewidth is .pt (72.27 / 25.4)
+# lwd units of 1/96 inch each, i.e. 72.27 / 96 mm.
+QGS_MM_PER_LINEWIDTH <- 72.27 / 96
+
 #' Write a ggplot2 map plot as a QGIS project
 #'
 #' Converts a ggplot2 plot whose layers are drawn from sf objects into a
@@ -23,6 +27,12 @@ QGS_GRADIENT_STOPS <- 21L
 #' - a discrete one becomes a categorized renderer,
 #' - a layer with no `fill`/`colour` mapping becomes a single symbol with
 #'   the color ggplot2 would have used.
+#'
+#' Following ggplot2's semantics for polygons, `fill` is the interior and
+#' `colour` is the border: a `colour` scale on a polygon layer colors the
+#' outlines while the interior keeps the constant fill. Constant outline
+#' colors and widths are taken from the plot as well. Mapping both `fill`
+#' and `colour` on the same layer is not supported.
 #'
 #' Only a bare column name is supported for the `fill`/`colour` aesthetics;
 #' a constant or a computed expression (e.g. `aes(fill = AREA * 2)`) is an
@@ -135,13 +145,14 @@ write_qgs <- function(plot, path, use_plot_crs = FALSE,
     }
     sf::st_write(d, gpkg_path, layer = layer_name, quiet = TRUE)
 
+    geometry <- qgs_geometry_type(d, i)
     builder$add_vector_layer(
       # relative to the project file
       paste0(data_dir_name, "/", gpkg_file),
       layer_name,
       qgs_srs(crs),
-      qgs_geometry_type(d, i),
-      qgs_vector_style(plot, built, layer, i, d, gradient_style)
+      geometry,
+      qgs_vector_style(plot, built, layer, i, d, gradient_style, geometry)
     )
   }
 
@@ -177,20 +188,30 @@ qgs_geometry_type <- function(d, i) {
 # Resolves which aesthetic drives the color of the layer and returns the
 # matching VectorStyle. The layer's mapping takes precedence over the
 # plot's, following how ggplot2 itself resolves aesthetics.
-qgs_vector_style <- function(plot, built, layer, i, d, gradient_style) {
+qgs_vector_style <- function(plot, built, layer, i, d, gradient_style, geometry) {
   # aes() normalizes `color` to `colour`, so only these two keys exist.
   fill <- layer$mapping[["fill"]] %||% plot@mapping[["fill"]]
   colour <- layer$mapping[["colour"]] %||% plot@mapping[["colour"]]
-
-  if (!is.null(fill)) {
-    aes_name <- "fill"
-    quo <- fill
-  } else if (!is.null(colour)) {
-    aes_name <- "colour"
-    quo <- colour
-  } else {
-    return(qgs_single_style(built@data[[i]], i))
+  if (!is.null(fill) && !is.null(colour)) {
+    stop(
+      "layer ", i,
+      ": mapping both `fill` and `colour` on the same layer is not supported",
+      call. = FALSE
+    )
   }
+
+  const <- qgs_layer_constants(built@data[[i]])
+  # Rounded so binary float noise (0.15056250000000002) stays out of the
+  # project file.
+  outline_width <- round(const$linewidth * QGS_MM_PER_LINEWIDTH, 7)
+  is_polygon <- identical(geometry, GeometryType$Polygon)
+
+  if (is.null(fill) && is.null(colour)) {
+    return(qgs_single_style(const, is_polygon, outline_width))
+  }
+
+  aes_name <- if (is.null(fill)) "colour" else "fill"
+  quo <- fill %||% colour
 
   if (!(rlang::is_quosure(quo) && rlang::quo_is_symbol(quo))) {
     stop(
@@ -208,26 +229,57 @@ qgs_vector_style <- function(plot, built, layer, i, d, gradient_style) {
   }
 
   scale <- built@plot@scales$get_scales(aes_name)
-  if (scale$is_discrete()) {
+  style <- if (scale$is_discrete()) {
     qgs_categorized_style(scale, attribute, i)
   } else if (gradient_style == "continuous") {
     qgs_continuous_style(scale, attribute, i)
   } else {
     qgs_graduated_style(scale, attribute, i)
   }
+
+  if (aes_name == "fill") {
+    # A constant border around the varying fill.
+    style$set_outline(qgs_rgb(const$colour), outline_width)
+  } else if (is_polygon) {
+    # ggplot2 draws a colour aesthetic on polygons as the border color;
+    # the interior keeps the constant fill. The outline color is ignored
+    # for a stroke target, only its width applies.
+    style$set_stroke_target(qgs_rgb(const$fill))
+    style$set_outline(qgs_rgb(const$fill), outline_width)
+  } else if (identical(geometry, GeometryType$LineString)) {
+    # The line color is the varying one; only the width is constant.
+    style$set_outline(qgs_rgb(const$fill), outline_width)
+  }
+  # Points with a varying colour keep the QGIS marker defaults for the
+  # ring around the marker.
+
+  style
 }
 
-# For a layer without a fill/colour mapping, use the constant color ggplot2
-# computed for it.
-qgs_single_style <- function(computed, i) {
-  for (aes_name in c("fill", "colour")) {
-    colors <- computed[[aes_name]]
-    colors <- colors[!is.na(colors)]
-    if (length(colors) > 0L) {
-      return(VectorStyle$single(qgs_rgb(colors[[1L]])))
-    }
+# The constant aesthetics ggplot2 computed for a layer, taken from its
+# first feature (only meaningful for aesthetics that are not mapped).
+# The fallbacks are geom_sf()'s defaults.
+qgs_layer_constants <- function(computed) {
+  first_or <- function(name, default) {
+    v <- computed[[name]]
+    if (is.null(v) || is.na(v[[1L]])) default else v[[1L]]
   }
-  stop("layer ", i, ": cannot determine the color of the layer", call. = FALSE)
+  list(
+    colour = first_or("colour", "grey35"),
+    fill = first_or("fill", "grey90"),
+    linewidth = first_or("linewidth", 0.2)
+  )
+}
+
+# For a layer without a fill/colour mapping, reproduce ggplot2's constant
+# colors: interior + border for polygons; for lines and points the single
+# color is the stroke/marker color, with a matching ring (ggplot2 points
+# have no distinct border).
+qgs_single_style <- function(const, is_polygon, outline_width) {
+  main <- if (is_polygon) const$fill else const$colour
+  style <- VectorStyle$single(qgs_rgb(main))
+  style$set_outline(qgs_rgb(const$colour), outline_width)
+  style
 }
 
 # The gradient of a trained continuous scale, sampled at evenly spaced
