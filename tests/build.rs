@@ -52,7 +52,8 @@ fn full_project_is_well_formed() {
                 (0.3, Rgb::new(255, 255, 0)),
                 (1.0, Rgb::new(0, 0, 255)),
             ],
-        ),
+        )
+        .unwrap(),
     )
     .unwrap();
     b.add_vector_layer(
@@ -88,21 +89,21 @@ fn raster_project_is_well_formed() {
         "../tmp/volcano2.tif",
         "volcano2",
         2193,
-        RasterStyle::pseudocolor(5, 80.0, 200.0, &ramp),
+        RasterStyle::pseudocolor(5, 80.0, 200.0, &ramp).unwrap(),
     )
     .unwrap();
     b.add_raster_layer(
         "../tmp/volcano2.tif",
         "volcano2_discrete",
         2193,
-        RasterStyle::pseudocolor_discrete(10, 80.0, 200.0, &ramp),
+        RasterStyle::pseudocolor_discrete(10, 80.0, 200.0, &ramp).unwrap(),
     )
     .unwrap();
     b.add_raster_layer(
         "../tmp/cyl_tile.tif",
         "cyl_tile",
         3857,
-        RasterStyle::multiband((1, 35.0, 253.0), (2, 35.0, 251.0), (3, 35.0, 250.0)),
+        RasterStyle::multiband((1, 35.0, 253.0), (2, 35.0, 251.0), (3, 35.0, 250.0)).unwrap(),
     )
     .unwrap();
     let out = b.build();

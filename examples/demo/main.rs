@@ -31,7 +31,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         0.0,
         57.0,
         &[(0.0, Rgb::new(255, 255, 255)), (1.0, Rgb::new(255, 0, 0))],
-    ))?
+    )?)?
     .write_to("out/red.qgs")?;
 
     // Like samples/magma.qgs: the magma color ramp over the SID79 attribute.
@@ -41,7 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         0.0,
         57.0,
         demo_data::MAGMA_RAMP,
-    ))?
+    )?)?
     .write_to("out/magma.qgs")?;
 
     // Like samples/categorized.qgs: one color per NAME value.
@@ -49,7 +49,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "NAME",
         demo_data::NC_COUNTIES,
         Some(Rgb::new(255, 0, 0)),
-    ))?
+    )?)?
     .write_to("out/categorized.qgs")?;
 
     // Like samples/elevation.qgs: continuous pseudocolor over the single
@@ -59,7 +59,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "../tmp/volcano2.tif",
         "volcano2",
         2193,
-        RasterStyle::pseudocolor(5, 80.0, 200.0, demo_data::SPECTRAL_RAMP),
+        RasterStyle::pseudocolor(5, 80.0, 200.0, demo_data::SPECTRAL_RAMP)?,
     )?;
     b.write_to("out/elevation.qgs")?;
 
@@ -70,7 +70,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "../tmp/volcano2.tif",
         "volcano2",
         2193,
-        RasterStyle::pseudocolor_discrete(10, 80.0, 200.0, demo_data::SPECTRAL_RAMP),
+        RasterStyle::pseudocolor_discrete(10, 80.0, 200.0, demo_data::SPECTRAL_RAMP)?,
     )?;
     b.write_to("out/elevation_discrete.qgs")?;
 
@@ -81,7 +81,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "../tmp/cyl_tile.tif",
         "cyl_tile",
         3857,
-        RasterStyle::multiband((1, 35.0, 253.0), (2, 35.0, 251.0), (3, 35.0, 250.0)),
+        RasterStyle::multiband((1, 35.0, 253.0), (2, 35.0, 251.0), (3, 35.0, 250.0))?,
     )?;
     b.write_to("out/true-color.qgs")?;
 

@@ -143,6 +143,84 @@ pub struct GraduatedStyle {
     pub outline_width: f64,
 }
 
+/// Errors that can occur while constructing a style.
+#[derive(Debug)]
+pub enum StyleError {
+    /// A graduated or pseudocolor style needs at least 2 classes.
+    TooFewClasses(usize),
+    /// `min` must be smaller than `max` (or not greater, for multiband
+    /// channel limits).
+    InvalidRange { min: f64, max: f64 },
+    /// A color ramp needs at least 2 color stops.
+    TooFewColorStops(usize),
+    /// The first color stop must be at offset `0.0` and the last at `1.0`.
+    BadColorStopEndpoints,
+    /// Color stops must be in ascending offset order.
+    NonAscendingColorStops,
+    /// A categorized style needs at least 1 category.
+    NoCategories,
+    /// Band numbers are 1-based.
+    InvalidBand(u32),
+}
+
+impl std::fmt::Display for StyleError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StyleError::TooFewClasses(n) => {
+                write!(f, "style needs at least 2 classes, got {n}")
+            }
+            StyleError::InvalidRange { min, max } => {
+                write!(f, "invalid range: min ({min}) must be smaller than max ({max})")
+            }
+            StyleError::TooFewColorStops(n) => {
+                write!(f, "style needs at least 2 color stops, got {n}")
+            }
+            StyleError::BadColorStopEndpoints => {
+                write!(f, "first color stop must be at offset 0.0 and last at 1.0")
+            }
+            StyleError::NonAscendingColorStops => {
+                write!(f, "color stops must be in ascending offset order")
+            }
+            StyleError::NoCategories => write!(f, "categorized style needs at least 1 category"),
+            StyleError::InvalidBand(band) => {
+                write!(f, "band numbers are 1-based, got {band}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for StyleError {}
+
+/// Validates the shared constraints of ramp-based styles (graduated vector
+/// symbols and pseudocolor rasters).
+fn validate_ramp(
+    classes: usize,
+    min: f64,
+    max: f64,
+    color_stops: &[(f64, Rgb)],
+) -> Result<(), StyleError> {
+    if classes < 2 {
+        return Err(StyleError::TooFewClasses(classes));
+    }
+    if min >= max {
+        return Err(StyleError::InvalidRange { min, max });
+    }
+    validate_color_stops(color_stops)
+}
+
+fn validate_color_stops(color_stops: &[(f64, Rgb)]) -> Result<(), StyleError> {
+    if color_stops.len() < 2 {
+        return Err(StyleError::TooFewColorStops(color_stops.len()));
+    }
+    if color_stops.first().unwrap().0 != 0.0 || color_stops.last().unwrap().0 != 1.0 {
+        return Err(StyleError::BadColorStopEndpoints);
+    }
+    if !color_stops.windows(2).all(|w| w[0].0 < w[1].0) {
+        return Err(StyleError::NonAscendingColorStops);
+    }
+    Ok(())
+}
+
 /// Style for [`VectorStyle::Categorized`].
 ///
 /// Only the color (and the shared outline) of each category symbol is
@@ -221,7 +299,15 @@ impl RasterStyle {
     /// Continuous pseudocolor of band 1 with `classes` equally spaced ramp
     /// entries between `min` and `max` (like `samples/elevation.qgs`).
     /// `color_stops` follows the same rules as [`VectorStyle::graduated`].
-    pub fn pseudocolor(classes: usize, min: f64, max: f64, color_stops: &[(f64, Rgb)]) -> Self {
+    ///
+    /// Returns an error if the constraints documented in
+    /// [`VectorStyle::graduated`] are violated.
+    pub fn pseudocolor(
+        classes: usize,
+        min: f64,
+        max: f64,
+        color_stops: &[(f64, Rgb)],
+    ) -> Result<Self, StyleError> {
         Self::pseudocolor_with_mode(
             PseudocolorMode::Interpolated,
             classes,
@@ -233,12 +319,15 @@ impl RasterStyle {
 
     /// Discrete pseudocolor of band 1 with `classes` equal-interval classes
     /// between `min` and `max` (like `samples/elevation_discrete.qgs`).
+    ///
+    /// Returns an error if the constraints documented in
+    /// [`VectorStyle::graduated`] are violated.
     pub fn pseudocolor_discrete(
         classes: usize,
         min: f64,
         max: f64,
         color_stops: &[(f64, Rgb)],
-    ) -> Self {
+    ) -> Result<Self, StyleError> {
         Self::pseudocolor_with_mode(PseudocolorMode::Discrete, classes, min, max, color_stops)
     }
 
@@ -248,43 +337,41 @@ impl RasterStyle {
         min: f64,
         max: f64,
         color_stops: &[(f64, Rgb)],
-    ) -> Self {
-        assert!(classes >= 2, "pseudocolor style needs at least 2 classes");
-        assert!(min < max, "pseudocolor style needs min < max");
-        assert!(
-            color_stops.len() >= 2,
-            "pseudocolor style needs at least 2 color stops"
-        );
-        assert!(
-            color_stops.first().unwrap().0 == 0.0,
-            "first color stop must be at offset 0.0"
-        );
-        assert!(
-            color_stops.last().unwrap().0 == 1.0,
-            "last color stop must be at offset 1.0"
-        );
-        assert!(
-            color_stops.windows(2).all(|w| w[0].0 < w[1].0),
-            "color stops must be in ascending offset order"
-        );
-        RasterStyle::SingleBandPseudocolor(PseudocolorStyle {
+    ) -> Result<Self, StyleError> {
+        validate_ramp(classes, min, max, color_stops)?;
+        Ok(RasterStyle::SingleBandPseudocolor(PseudocolorStyle {
             band: 1,
             mode,
             classes,
             min,
             max,
             color_stops: color_stops.to_vec(),
-        })
+        }))
     }
 
     /// True-color rendering of three bands (like `samples/true-color.qgs`).
     /// Each channel is `(band, min, max)`; see [`MultibandColorStyle`].
-    pub fn multiband(red: (u32, f64, f64), green: (u32, f64, f64), blue: (u32, f64, f64)) -> Self {
+    ///
+    /// Returns an error if a band number is 0 or a channel's `min` is
+    /// greater than its `max`.
+    pub fn multiband(
+        red: (u32, f64, f64),
+        green: (u32, f64, f64),
+        blue: (u32, f64, f64),
+    ) -> Result<Self, StyleError> {
         for (band, min, max) in [red, green, blue] {
-            assert!(band >= 1, "band numbers are 1-based");
-            assert!(min <= max, "multiband style needs min <= max");
+            if band == 0 {
+                return Err(StyleError::InvalidBand(band));
+            }
+            if min > max {
+                return Err(StyleError::InvalidRange { min, max });
+            }
         }
-        RasterStyle::MultibandColor(MultibandColorStyle { red, green, blue })
+        Ok(RasterStyle::MultibandColor(MultibandColorStyle {
+            red,
+            green,
+            blue,
+        }))
     }
 
     /// Number of `<noDataList>` entries to emit: one per band, up to the
@@ -312,16 +399,17 @@ impl VectorStyle {
     /// one `<category>` linked to one `<symbol>`. `catch_all`, if given, is
     /// the color of the trailing "all other values" (`value="NULL"`)
     /// category.
+    ///
+    /// Returns an error if `categories` is empty.
     pub fn categorized(
         attribute: impl Into<String>,
         categories: &[(impl AsRef<str>, Rgb)],
         catch_all: Option<Rgb>,
-    ) -> Self {
-        assert!(
-            !categories.is_empty(),
-            "categorized style needs at least 1 category"
-        );
-        VectorStyle::Categorized(CategorizedStyle {
+    ) -> Result<Self, StyleError> {
+        if categories.is_empty() {
+            return Err(StyleError::NoCategories);
+        }
+        Ok(VectorStyle::Categorized(CategorizedStyle {
             attribute: attribute.into(),
             categories: categories
                 .iter()
@@ -330,7 +418,7 @@ impl VectorStyle {
             catch_all,
             outline_color: Rgb::new(35, 35, 35),
             outline_width: 0.26,
-        })
+        }))
     }
 
     /// Graduated coloring of `attribute` with `classes` equal-interval
@@ -338,32 +426,19 @@ impl VectorStyle {
     /// `color_stops`, a list of `(offset, color)` control points with
     /// offsets in `0..=1`: the first entry must be at `0.0`, the last at
     /// `1.0`. A plain two-color ramp is `&[(0.0, from), (1.0, to)]`.
+    ///
+    /// Returns an error if `classes < 2`, `min >= max`, there are fewer
+    /// than 2 color stops, the stop offsets don't start at `0.0` and end at
+    /// `1.0`, or they are not in ascending order.
     pub fn graduated(
         attribute: impl Into<String>,
         classes: usize,
         min: f64,
         max: f64,
         color_stops: &[(f64, Rgb)],
-    ) -> Self {
-        assert!(classes >= 2, "graduated style needs at least 2 classes");
-        assert!(min < max, "graduated style needs min < max");
-        assert!(
-            color_stops.len() >= 2,
-            "graduated style needs at least 2 color stops"
-        );
-        assert!(
-            color_stops.first().unwrap().0 == 0.0,
-            "first color stop must be at offset 0.0"
-        );
-        assert!(
-            color_stops.last().unwrap().0 == 1.0,
-            "last color stop must be at offset 1.0"
-        );
-        assert!(
-            color_stops.windows(2).all(|w| w[0].0 < w[1].0),
-            "color stops must be in ascending offset order"
-        );
-        VectorStyle::Graduated(GraduatedStyle {
+    ) -> Result<Self, StyleError> {
+        validate_ramp(classes, min, max, color_stops)?;
+        Ok(VectorStyle::Graduated(GraduatedStyle {
             attribute: attribute.into(),
             classes,
             min,
@@ -371,7 +446,7 @@ impl VectorStyle {
             color_stops: color_stops.to_vec(),
             outline_color: Rgb::new(35, 35, 35),
             outline_width: 0.26,
-        })
+        }))
     }
 }
 
@@ -1053,7 +1128,8 @@ mod tests {
                 ("Alexander", Rgb::new(255, 252, 252)),
             ],
             Some(Rgb::new(255, 0, 0)),
-        );
+        )
+        .unwrap();
         let mut w = XmlWriter::new(0);
         write_renderer(&mut w, GeometryType::Polygon, &style);
         let out = w.finish();
@@ -1081,6 +1157,60 @@ mod tests {
         assert!(out.contains("255,0,0,255,rgb:1,0,0,1"));
     }
 
+    #[test]
+    fn invalid_styles_are_errors() {
+        let ramp = [(0.0, Rgb::new(0, 0, 0)), (1.0, Rgb::new(255, 255, 255))];
+        assert!(matches!(
+            VectorStyle::graduated("x", 1, 0.0, 1.0, &ramp),
+            Err(StyleError::TooFewClasses(1))
+        ));
+        assert!(matches!(
+            VectorStyle::graduated("x", 2, 1.0, 1.0, &ramp),
+            Err(StyleError::InvalidRange { .. })
+        ));
+        assert!(matches!(
+            VectorStyle::graduated("x", 2, 0.0, 1.0, &ramp[..1]),
+            Err(StyleError::TooFewColorStops(1))
+        ));
+        assert!(matches!(
+            VectorStyle::graduated(
+                "x",
+                2,
+                0.0,
+                1.0,
+                &[(0.1, Rgb::new(0, 0, 0)), (1.0, Rgb::new(255, 255, 255))]
+            ),
+            Err(StyleError::BadColorStopEndpoints)
+        ));
+        assert!(matches!(
+            VectorStyle::graduated(
+                "x",
+                2,
+                0.0,
+                1.0,
+                &[
+                    (0.0, Rgb::new(0, 0, 0)),
+                    (0.5, Rgb::new(255, 255, 255)),
+                    (0.5, Rgb::new(0, 0, 0)),
+                    (1.0, Rgb::new(255, 255, 255))
+                ]
+            ),
+            Err(StyleError::NonAscendingColorStops)
+        ));
+        assert!(matches!(
+            VectorStyle::categorized("x", &[] as &[(&str, Rgb)], None),
+            Err(StyleError::NoCategories)
+        ));
+        assert!(matches!(
+            RasterStyle::multiband((0, 0.0, 1.0), (1, 0.0, 1.0), (1, 0.0, 1.0)),
+            Err(StyleError::InvalidBand(0))
+        ));
+        assert!(matches!(
+            RasterStyle::multiband((1, 2.0, 1.0), (1, 0.0, 1.0), (1, 0.0, 1.0)),
+            Err(StyleError::InvalidRange { .. })
+        ));
+    }
+
     /// The ramp of the elevation samples (`samples/elevation*.qgs`).
     const SPECTRAL: &[(f64, Rgb)] = &[
         (0.0, Rgb::new(215, 25, 28)),
@@ -1093,7 +1223,7 @@ mod tests {
     #[test]
     fn pseudocolor_interpolated_matches_sample() {
         // samples/elevation.qgs: 5 items at 80..200.
-        let style = RasterStyle::pseudocolor(5, 80.0, 200.0, SPECTRAL);
+        let style = RasterStyle::pseudocolor(5, 80.0, 200.0, SPECTRAL).unwrap();
         let mut w = XmlWriter::new(0);
         write_raster_renderer(&mut w, &style);
         let out = w.finish();
@@ -1122,7 +1252,7 @@ mod tests {
     #[test]
     fn pseudocolor_discrete_matches_sample() {
         // samples/elevation_discrete.qgs: 10 classes over 80..200.
-        let style = RasterStyle::pseudocolor_discrete(10, 80.0, 200.0, SPECTRAL);
+        let style = RasterStyle::pseudocolor_discrete(10, 80.0, 200.0, SPECTRAL).unwrap();
         let mut w = XmlWriter::new(0);
         write_raster_renderer(&mut w, &style);
         let out = w.finish();
@@ -1153,7 +1283,8 @@ mod tests {
     #[test]
     fn multiband_matches_sample() {
         // samples/true-color.qgs.
-        let style = RasterStyle::multiband((1, 35.0, 253.0), (2, 35.0, 251.0), (3, 35.0, 250.0));
+        let style =
+            RasterStyle::multiband((1, 35.0, 253.0), (2, 35.0, 251.0), (3, 35.0, 250.0)).unwrap();
         let mut w = XmlWriter::new(0);
         write_raster_renderer(&mut w, &style);
         let out = w.finish();
