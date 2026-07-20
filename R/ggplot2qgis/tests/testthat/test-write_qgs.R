@@ -50,6 +50,18 @@ test_that("a continuous fill becomes a graduated style", {
   ends <- grDevices::col2rgb(s$map(s$get_limits()))
   expect_match(out, paste(ends[, 1], collapse = ","), fixed = TRUE)
   expect_match(out, paste(ends[, 2], collapse = ","), fixed = TRUE)
+
+  # The constant border matches ggplot2: grey35, linewidth 0.2 in mm.
+  expect_match(
+    out,
+    '<Option name="outline_color" type="QString" value="89,89,89,255,rgb:',
+    fixed = TRUE
+  )
+  expect_match(
+    out,
+    '<Option name="outline_width" type="QString" value="0.1505625"/>',
+    fixed = TRUE
+  )
 })
 
 test_that("the written gpkg keeps the raw data", {
@@ -124,7 +136,7 @@ test_that("a discrete fill becomes a categorized style", {
   expect_match(out, 'value="odd"', fixed = TRUE)
 })
 
-test_that("a colour mapping is used when there is no fill", {
+test_that("a colour mapping on polygons colors the borders", {
   nc <- read_nc()
   # color= is normalized to colour by aes()
   p <- ggplot2::ggplot(nc) +
@@ -137,6 +149,51 @@ test_that("a colour mapping is used when there is no fill", {
   out <- read_qgs(path)
   expect_match(out, 'type="graduatedSymbol"', fixed = TRUE)
   expect_match(out, 'attr="AREA"', fixed = TRUE)
+
+  # The gradient goes to the outline; every interior is the constant
+  # fill ggplot2 computed (grey90).
+  b <- ggplot2::ggplot_build(p)
+  s <- b@plot@scales$get_scales("colour")
+  ends <- grDevices::col2rgb(s$map(s$get_limits()))
+  expect_match(
+    out,
+    paste0(
+      '<Option name="outline_color" type="QString" value="',
+      paste(ends[, 1], collapse = ",")
+    ),
+    fixed = TRUE
+  )
+  expect_match(
+    out,
+    '<Option name="color" type="QString" value="229,229,229,255,rgb:',
+    fixed = TRUE
+  )
+})
+
+test_that("a continuous colour on polygons targets the outline property", {
+  nc <- read_nc()
+  p <- ggplot2::ggplot(nc) +
+    ggplot2::geom_sf(ggplot2::aes(color = AREA))
+
+  dir <- local_out_dir()
+  path <- file.path(dir, "proj.qgs")
+  write_qgs(p, path, gradient_style = "continuous")
+
+  out <- read_qgs(path)
+  expect_match(out, '<Option name="outlineColor" type="Map">', fixed = TRUE)
+  expect_no_match(out, '<Option name="fillColor"', fixed = TRUE)
+  expect_match(out, "ramp_color(create_ramp(map(", fixed = TRUE)
+})
+
+test_that("mapping both fill and colour is an error", {
+  nc <- read_nc()
+  p <- ggplot2::ggplot(nc) +
+    ggplot2::geom_sf(ggplot2::aes(fill = AREA, color = AREA))
+
+  expect_error(
+    write_qgs(p, tempfile(fileext = ".qgs")),
+    "both `fill` and `colour`"
+  )
 })
 
 test_that("a plot-level mapping is picked up too", {
@@ -165,6 +222,23 @@ test_that("no fill/colour mapping becomes a single style", {
   out <- read_qgs(path)
   expect_match(out, 'type="singleSymbol"', fixed = TRUE)
   expect_no_match(out, "ramp_color", fixed = TRUE)
+
+  # geom_sf() constants: grey90 fill, grey35 border, linewidth 0.2 in mm.
+  expect_match(
+    out,
+    '<Option name="color" type="QString" value="229,229,229,255,rgb:',
+    fixed = TRUE
+  )
+  expect_match(
+    out,
+    '<Option name="outline_color" type="QString" value="89,89,89,255,rgb:',
+    fixed = TRUE
+  )
+  expect_match(
+    out,
+    '<Option name="outline_width" type="QString" value="0.1505625"/>',
+    fixed = TRUE
+  )
 })
 
 test_that("each layer gets its own gpkg, bottom-most first", {

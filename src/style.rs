@@ -95,6 +95,18 @@ impl GeometryType {
     }
 }
 
+/// Which color of a symbol a graduated/continuous/categorized style
+/// varies. The other color stays constant across all features.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ColorTarget {
+    /// The interior (fill) color varies; the outline is constant.
+    #[default]
+    Fill,
+    /// The outline (stroke) color varies; the fill is constant. This is
+    /// how e.g. ggplot2 renders a `colour` aesthetic on polygons.
+    Stroke,
+}
+
 /// How a vector layer is rendered.
 #[derive(Debug, Clone)]
 pub enum VectorStyle {
@@ -141,6 +153,13 @@ pub struct GraduatedStyle {
     /// Gradient control points `(offset, color)`, sorted by offset;
     /// the first must be at `0.0` and the last at `1.0`.
     pub color_stops: Vec<(f64, Rgb)>,
+    /// Which color the ramp drives.
+    pub target: ColorTarget,
+    /// Constant fill color; only used when `target` is
+    /// [`ColorTarget::Stroke`].
+    pub fill_color: Rgb,
+    /// Constant outline color; only used when `target` is
+    /// [`ColorTarget::Fill`].
     pub outline_color: Rgb,
     /// Stroke width in millimeters.
     pub outline_width: f64,
@@ -164,6 +183,13 @@ pub struct ContinuousStyle {
     /// Gradient control points `(offset, color)`, sorted by offset;
     /// the first must be at `0.0` and the last at `1.0`.
     pub color_stops: Vec<(f64, Rgb)>,
+    /// Which color the ramp drives.
+    pub target: ColorTarget,
+    /// Constant fill color; only used when `target` is
+    /// [`ColorTarget::Stroke`].
+    pub fill_color: Rgb,
+    /// Constant outline color; only used when `target` is
+    /// [`ColorTarget::Fill`].
     pub outline_color: Rgb,
     /// Stroke width in millimeters.
     pub outline_width: f64,
@@ -187,6 +213,8 @@ pub enum StyleError {
     NoCategories,
     /// Band numbers are 1-based.
     InvalidBand(u32),
+    /// A single-symbol style has no varying color to move to the stroke.
+    NoVaryingColor,
 }
 
 impl std::fmt::Display for StyleError {
@@ -210,6 +238,12 @@ impl std::fmt::Display for StyleError {
             StyleError::NoCategories => write!(f, "categorized style needs at least 1 category"),
             StyleError::InvalidBand(band) => {
                 write!(f, "band numbers are 1-based, got {band}")
+            }
+            StyleError::NoVaryingColor => {
+                write!(
+                    f,
+                    "a single-symbol style has no varying color to move to the stroke"
+                )
             }
         }
     }
@@ -261,6 +295,13 @@ pub struct CategorizedStyle {
     /// Optional catch-all category ("all other values"), rendered as
     /// `<category type="NULL" value="NULL"/>`.
     pub catch_all: Option<Rgb>,
+    /// Which color the category colors drive.
+    pub target: ColorTarget,
+    /// Constant fill color; only used when `target` is
+    /// [`ColorTarget::Stroke`].
+    pub fill_color: Rgb,
+    /// Constant outline color; only used when `target` is
+    /// [`ColorTarget::Fill`].
     pub outline_color: Rgb,
     /// Stroke width in millimeters.
     pub outline_width: f64,
@@ -442,6 +483,8 @@ impl VectorStyle {
                 .map(|(value, color)| (value.as_ref().to_string(), *color))
                 .collect(),
             catch_all,
+            target: ColorTarget::Fill,
+            fill_color: Rgb::new(229, 229, 229),
             outline_color: Rgb::new(35, 35, 35),
             outline_width: 0.26,
         }))
@@ -468,9 +511,64 @@ impl VectorStyle {
             min,
             max,
             color_stops: color_stops.to_vec(),
+            target: ColorTarget::Fill,
+            fill_color: Rgb::new(229, 229, 229),
             outline_color: Rgb::new(35, 35, 35),
             outline_width: 0.26,
         }))
+    }
+
+    /// Sets the constant outline (stroke) color and width in millimeters.
+    /// The defaults are QGIS's: dark gray (35, 35, 35), 0.26 mm. For a
+    /// style whose varying color targets the stroke, the width still
+    /// applies but the color is ignored.
+    pub fn set_outline(&mut self, color: Rgb, width: f64) {
+        match self {
+            VectorStyle::SingleSymbol(s) => {
+                s.outline_color = color;
+                s.outline_width = width;
+            }
+            VectorStyle::Graduated(s) => {
+                s.outline_color = color;
+                s.outline_width = width;
+            }
+            VectorStyle::Continuous(s) => {
+                s.outline_color = color;
+                s.outline_width = width;
+            }
+            VectorStyle::Categorized(s) => {
+                s.outline_color = color;
+                s.outline_width = width;
+            }
+        }
+    }
+
+    /// Makes the varying color of a graduated, continuous, or categorized
+    /// style drive the outline (stroke) instead of the fill; every feature
+    /// shares the constant `fill_color`. This is how e.g. ggplot2 renders
+    /// a `colour` aesthetic on polygons.
+    ///
+    /// Returns an error for a single-symbol style, which has no varying
+    /// color.
+    pub fn set_stroke_target(&mut self, fill_color: Rgb) -> Result<(), StyleError> {
+        match self {
+            VectorStyle::SingleSymbol(_) => Err(StyleError::NoVaryingColor),
+            VectorStyle::Graduated(s) => {
+                s.target = ColorTarget::Stroke;
+                s.fill_color = fill_color;
+                Ok(())
+            }
+            VectorStyle::Continuous(s) => {
+                s.target = ColorTarget::Stroke;
+                s.fill_color = fill_color;
+                Ok(())
+            }
+            VectorStyle::Categorized(s) => {
+                s.target = ColorTarget::Stroke;
+                s.fill_color = fill_color;
+                Ok(())
+            }
+        }
     }
 
     /// Graduated coloring of `attribute` with `classes` equal-interval
@@ -496,6 +594,8 @@ impl VectorStyle {
             min,
             max,
             color_stops: color_stops.to_vec(),
+            target: ColorTarget::Fill,
+            fill_color: Rgb::new(229, 229, 229),
             outline_color: Rgb::new(35, 35, 35),
             outline_width: 0.26,
         }))
@@ -693,22 +793,32 @@ fn write_symbol(
     outline_color: Rgb,
     outline_width: f64,
 ) {
-    write_symbol_with_dd_color(w, name, geom, color, outline_color, outline_width, None);
+    write_symbol_with_dd_color(
+        w,
+        name,
+        geom,
+        color,
+        outline_color,
+        outline_width,
+        None,
+        ColorTarget::Fill,
+    );
 }
 
-/// The data-defined property that drives the main color of a symbol layer,
-/// as QGIS serializes it (`QgsSymbolLayer::propertyDefinitions()`).
-fn color_property_name(geom: GeometryType) -> &'static str {
-    match geom {
+/// The data-defined property that drives the targeted color of a symbol
+/// layer, as QGIS serializes it (`QgsSymbolLayer::propertyDefinitions()`).
+fn color_property_name(geom: GeometryType, target: ColorTarget) -> &'static str {
+    match (geom, target) {
         // SimpleMarker and SimpleFill color both map to PropertyFillColor.
-        GeometryType::Point | GeometryType::Polygon => "fillColor",
-        // SimpleLine color maps to PropertyStrokeColor.
-        GeometryType::LineString => "outlineColor",
+        (GeometryType::Point | GeometryType::Polygon, ColorTarget::Fill) => "fillColor",
+        // SimpleLine's color is its stroke, and an explicit stroke target
+        // maps to PropertyStrokeColor everywhere.
+        (GeometryType::LineString, _) | (_, ColorTarget::Stroke) => "outlineColor",
     }
 }
 
-/// Like [`write_symbol`], but the symbol layer's main color can carry a
-/// data-defined expression override.
+/// Like [`write_symbol`], but the symbol layer's targeted color can carry
+/// a data-defined expression override.
 #[allow(clippy::too_many_arguments)]
 fn write_symbol_with_dd_color(
     w: &mut XmlWriter,
@@ -718,6 +828,7 @@ fn write_symbol_with_dd_color(
     outline_color: Rgb,
     outline_width: f64,
     color_expression: Option<&str>,
+    target: ColorTarget,
 ) {
     let class = match geom {
         GeometryType::Point => "SimpleMarker",
@@ -750,7 +861,7 @@ fn write_symbol_with_dd_color(
     write_data_defined_properties_with(
         w,
         "data_defined_properties",
-        color_expression.map(|expr| (color_property_name(geom), expr)),
+        color_expression.map(|expr| (color_property_name(geom, target), expr)),
     );
     w.end(); // layer
     w.end(); // symbol
@@ -844,6 +955,16 @@ fn range_label(lower: f64, upper: f64, precision: usize) -> String {
     format!("{} - {}", bound(lower), bound(upper))
 }
 
+/// Resolves the (fill, outline) colors of one symbol: the varying
+/// (ramp/category) color goes to the slot `target` points at, the other
+/// slot keeps its constant color.
+fn target_colors(target: ColorTarget, varying: Rgb, fill: Rgb, outline: Rgb) -> (Rgb, Rgb) {
+    match target {
+        ColorTarget::Fill => (varying, outline),
+        ColorTarget::Stroke => (fill, varying),
+    }
+}
+
 /// Writes the `<renderer-v2>` element for a vector layer.
 pub(crate) fn write_renderer(w: &mut XmlWriter, geom: GeometryType, style: &VectorStyle) {
     match style {
@@ -872,16 +993,24 @@ pub(crate) fn write_renderer(w: &mut XmlWriter, geom: GeometryType, style: &Vect
                 .attr("symbollevels", "0")
                 .attr("type", "singleSymbol");
             w.start("symbols");
-            // The static color (also the legend swatch) is the middle of
-            // the ramp; per feature it is overridden by the expression.
+            // The static varying color (also the legend swatch) is the
+            // middle of the ramp; per feature it is overridden by the
+            // expression on the targeted color property.
+            let (color, outline) = target_colors(
+                c.target,
+                sample_ramp(&c.color_stops, 0.5),
+                c.fill_color,
+                c.outline_color,
+            );
             write_symbol_with_dd_color(
                 w,
                 "0",
                 geom,
-                sample_ramp(&c.color_stops, 0.5),
-                c.outline_color,
+                color,
+                outline,
                 c.outline_width,
                 Some(&expression),
+                c.target,
             );
             w.end(); // symbols
             w.empty("rotation", &[]);
@@ -917,26 +1046,23 @@ pub(crate) fn write_renderer(w: &mut XmlWriter, geom: GeometryType, style: &Vect
             w.start("symbols");
             for i in 0..g.classes {
                 let t = i as f64 / (g.classes - 1) as f64;
-                let color = sample_ramp(&g.color_stops, t);
-                write_symbol(
-                    w,
-                    &i.to_string(),
-                    geom,
-                    color,
+                let (color, outline) = target_colors(
+                    g.target,
+                    sample_ramp(&g.color_stops, t),
+                    g.fill_color,
                     g.outline_color,
-                    g.outline_width,
                 );
+                write_symbol(w, &i.to_string(), geom, color, outline, g.outline_width);
             }
             w.end(); // symbols
             w.start("source-symbol");
-            write_symbol(
-                w,
-                "0",
-                geom,
+            let (color, outline) = target_colors(
+                g.target,
                 g.color_stops[0].1,
+                g.fill_color,
                 g.outline_color,
-                g.outline_width,
             );
+            write_symbol(w, "0", geom, color, outline, g.outline_width);
             w.end(); // source-symbol
             write_gradient_colorramp(
                 w,
@@ -998,36 +1124,28 @@ pub(crate) fn write_renderer(w: &mut XmlWriter, geom: GeometryType, style: &Vect
             }
             w.end(); // categories
             w.start("symbols");
-            for (i, (_, color)) in c.categories.iter().enumerate() {
-                write_symbol(
-                    w,
-                    &i.to_string(),
-                    geom,
-                    *color,
-                    c.outline_color,
-                    c.outline_width,
-                );
+            for (i, (_, category_color)) in c.categories.iter().enumerate() {
+                let (color, outline) =
+                    target_colors(c.target, *category_color, c.fill_color, c.outline_color);
+                write_symbol(w, &i.to_string(), geom, color, outline, c.outline_width);
             }
-            if let Some(color) = c.catch_all {
+            if let Some(catch_all_color) = c.catch_all {
+                let (color, outline) =
+                    target_colors(c.target, catch_all_color, c.fill_color, c.outline_color);
                 write_symbol(
                     w,
                     &c.categories.len().to_string(),
                     geom,
                     color,
-                    c.outline_color,
+                    outline,
                     c.outline_width,
                 );
             }
             w.end(); // symbols
             w.start("source-symbol");
-            write_symbol(
-                w,
-                "0",
-                geom,
-                c.categories[0].1,
-                c.outline_color,
-                c.outline_width,
-            );
+            let (color, outline) =
+                target_colors(c.target, c.categories[0].1, c.fill_color, c.outline_color);
+            write_symbol(w, "0", geom, color, outline, c.outline_width);
             w.end(); // source-symbol
             // The colorramp is only informational for a categorized
             // renderer (used when re-classifying); derive it from the
@@ -1439,6 +1557,74 @@ mod tests {
     fn continuous_field_names_are_escaped() {
         assert_eq!(quote_field("AREA"), "\"AREA\"");
         assert_eq!(quote_field("odd\"name"), "\"odd\"\"name\"");
+    }
+
+    #[test]
+    fn set_outline_applies_to_every_variant() {
+        let mut style = VectorStyle::single(Rgb::new(229, 229, 229));
+        style.set_outline(Rgb::new(89, 89, 89), 0.1505625);
+        let mut w = XmlWriter::new(0);
+        write_renderer(&mut w, GeometryType::Polygon, &style);
+        let out = w.finish();
+        assert!(out.contains(
+            "<Option name=\"outline_color\" type=\"QString\" value=\"89,89,89,255,rgb:"
+        ));
+        assert!(out.contains(
+            "<Option name=\"outline_width\" type=\"QString\" value=\"0.1505625\"/>"
+        ));
+    }
+
+    #[test]
+    fn stroke_target_moves_the_ramp_to_the_outline() {
+        let mut style = VectorStyle::graduated(
+            "AREA",
+            2,
+            0.0,
+            1.0,
+            &[(0.0, Rgb::new(10, 20, 30)), (1.0, Rgb::new(200, 210, 220))],
+        )
+        .unwrap();
+        style.set_stroke_target(Rgb::new(229, 229, 229)).unwrap();
+        let mut w = XmlWriter::new(0);
+        write_renderer(&mut w, GeometryType::Polygon, &style);
+        let out = w.finish();
+
+        // The ramp endpoints land on the outline...
+        assert!(out.contains("<Option name=\"outline_color\" type=\"QString\" value=\"10,20,30,255,rgb:"));
+        assert!(out.contains(
+            "<Option name=\"outline_color\" type=\"QString\" value=\"200,210,220,255,rgb:"
+        ));
+        // ...and every symbol's fill is the shared constant.
+        assert!(out.contains("<Option name=\"color\" type=\"QString\" value=\"229,229,229,255,rgb:"));
+        assert!(!out.contains("<Option name=\"color\" type=\"QString\" value=\"10,20,30,255,rgb:"));
+    }
+
+    #[test]
+    fn stroke_target_switches_the_continuous_dd_property() {
+        let mut style = VectorStyle::continuous(
+            "AREA",
+            0.0,
+            1.0,
+            &[(0.0, Rgb::new(0, 0, 0)), (1.0, Rgb::new(255, 255, 255))],
+        )
+        .unwrap();
+        style.set_stroke_target(Rgb::new(229, 229, 229)).unwrap();
+        let mut w = XmlWriter::new(0);
+        write_renderer(&mut w, GeometryType::Polygon, &style);
+        let out = w.finish();
+
+        assert!(out.contains("<Option name=\"outlineColor\" type=\"Map\">"));
+        assert!(!out.contains("<Option name=\"fillColor\""));
+        assert!(out.contains("ramp_color(create_ramp("));
+    }
+
+    #[test]
+    fn stroke_target_on_single_symbol_is_an_error() {
+        let mut style = VectorStyle::single(Rgb::new(0, 0, 0));
+        assert!(matches!(
+            style.set_stroke_target(Rgb::new(229, 229, 229)),
+            Err(StyleError::NoVaryingColor)
+        ));
     }
 
     #[test]

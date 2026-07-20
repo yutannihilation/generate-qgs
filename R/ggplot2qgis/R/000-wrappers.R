@@ -271,11 +271,25 @@ class(`Rgb`) <- c("ggplot2qgis::Rgb__bundle", "savvy_ggplot2qgis__sealed")
 
 ### wrapper functions for VectorStyle
 
+`VectorStyle_set_outline` <- function(self) {
+  function(`color`, `width`) {
+    `color` <- .savvy_extract_ptr(`color`, "ggplot2qgis::Rgb")
+    invisible(.Call(savvy_VectorStyle_set_outline__impl, `self`, `color`, `width`))
+  }
+}
+
+`VectorStyle_set_stroke_target` <- function(self) {
+  function(`fill_color`) {
+    `fill_color` <- .savvy_extract_ptr(`fill_color`, "ggplot2qgis::Rgb")
+    invisible(.Call(savvy_VectorStyle_set_stroke_target__impl, `self`, `fill_color`))
+  }
+}
 
 `.savvy_wrap_VectorStyle` <- function(ptr) {
   e <- new.env(parent = emptyenv())
   e$.ptr <- ptr
-
+  e$`set_outline` <- `VectorStyle_set_outline`(ptr)
+  e$`set_stroke_target` <- `VectorStyle_set_stroke_target`(ptr)
 
   class(e) <- c("ggplot2qgis::VectorStyle", "VectorStyle", "savvy_ggplot2qgis__sealed")
   e
@@ -300,6 +314,14 @@ class(`Rgb`) <- c("ggplot2qgis::Rgb__bundle", "savvy_ggplot2qgis__sealed")
 #' - `VectorStyle$categorized(attribute, values, colors_r, colors_g,
 #'   colors_b, catch_all)`: each discrete attribute value gets its own
 #'   color. `catch_all` is an optional `Rgb` for all other values.
+#'
+#' A style can be adjusted in place after construction:
+#'
+#' - `$set_outline(color, width)`: the constant outline (stroke) color
+#'   and width in millimeters (defaults: dark gray, 0.26).
+#' - `$set_stroke_target(fill_color)`: moves the varying color of a
+#'   graduated/continuous/categorized style to the outline; all features
+#'   share the constant `fill_color`. Errors on a single style.
 #'
 #' @export
 `VectorStyle` <- new.env(parent = emptyenv())

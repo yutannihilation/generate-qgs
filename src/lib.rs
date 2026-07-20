@@ -42,8 +42,8 @@ use std::path::Path;
 
 pub use srs::{Srs, SrsError};
 pub use style::{
-    ContinuousStyle, GeometryType, GraduatedStyle, MultibandColorStyle, PseudocolorMode,
-    PseudocolorStyle, RasterStyle, Rgb, SimpleStyle, StyleError, VectorStyle,
+    ColorTarget, ContinuousStyle, GeometryType, GraduatedStyle, MultibandColorStyle,
+    PseudocolorMode, PseudocolorStyle, RasterStyle, Rgb, SimpleStyle, StyleError, VectorStyle,
 };
 
 use layers::{Layer, RasterLayer, VectorLayer, XyzLayer};

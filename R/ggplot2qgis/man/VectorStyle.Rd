@@ -23,4 +23,13 @@ legend shows a single swatch.
 \item \code{VectorStyle$categorized(attribute, values, colors_r, colors_g, colors_b, catch_all)}: each discrete attribute value gets its own
 color. \code{catch_all} is an optional \code{Rgb} for all other values.
 }
+
+A style can be adjusted in place after construction:
+\itemize{
+\item \verb{$set_outline(color, width)}: the constant outline (stroke) color
+and width in millimeters (defaults: dark gray, 0.26).
+\item \verb{$set_stroke_target(fill_color)}: moves the varying color of a
+graduated/continuous/categorized style to the outline; all features
+share the constant \code{fill_color}. Errors on a single style.
+}
 }

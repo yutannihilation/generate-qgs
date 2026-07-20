@@ -111,6 +111,16 @@ SEXP savvy_VectorStyle_graduated__impl(SEXP c_arg__attribute, SEXP c_arg__classe
     return handle_result(res);
 }
 
+SEXP savvy_VectorStyle_set_outline__impl(SEXP self__, SEXP c_arg__color, SEXP c_arg__width) {
+    SEXP res = savvy_VectorStyle_set_outline__ffi(self__, c_arg__color, c_arg__width);
+    return handle_result(res);
+}
+
+SEXP savvy_VectorStyle_set_stroke_target__impl(SEXP self__, SEXP c_arg__fill_color) {
+    SEXP res = savvy_VectorStyle_set_stroke_target__ffi(self__, c_arg__fill_color);
+    return handle_result(res);
+}
+
 SEXP savvy_VectorStyle_single__impl(SEXP c_arg__color) {
     SEXP res = savvy_VectorStyle_single__ffi(c_arg__color);
     return handle_result(res);
@@ -134,6 +144,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"savvy_VectorStyle_categorized__impl", (DL_FUNC) &savvy_VectorStyle_categorized__impl, 6},
     {"savvy_VectorStyle_continuous__impl", (DL_FUNC) &savvy_VectorStyle_continuous__impl, 7},
     {"savvy_VectorStyle_graduated__impl", (DL_FUNC) &savvy_VectorStyle_graduated__impl, 8},
+    {"savvy_VectorStyle_set_outline__impl", (DL_FUNC) &savvy_VectorStyle_set_outline__impl, 3},
+    {"savvy_VectorStyle_set_stroke_target__impl", (DL_FUNC) &savvy_VectorStyle_set_stroke_target__impl, 2},
     {"savvy_VectorStyle_single__impl", (DL_FUNC) &savvy_VectorStyle_single__impl, 1},
     {NULL, NULL, 0}
 };
