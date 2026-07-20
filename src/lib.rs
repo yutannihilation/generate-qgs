@@ -59,11 +59,22 @@ const TEMPLATE: &str = include_str!("template.qgs");
 #[derive(Default)]
 pub struct QgsBuilder {
     layers: Vec<Layer>,
+    project_srs: Option<srs::ResolvedSrs>,
 }
 
 impl QgsBuilder {
     pub fn new() -> Self {
         QgsBuilder::default()
+    }
+
+    /// Sets the project CRS, i.e. the CRS of the map canvas. Layers whose
+    /// SRS differs are reprojected on the fly by QGIS. If not set, the
+    /// template's default (EPSG:3857) is kept.
+    ///
+    /// Returns an error if the SRS cannot be resolved.
+    pub fn set_project_crs(&mut self, srs: impl Into<Srs>) -> Result<&mut Self, SrsError> {
+        self.project_srs = Some(srs.into().resolve()?);
+        Ok(self)
     }
 
     /// Adds an XYZ tile layer (e.g. OpenStreetMap-like tiles). The `url`
@@ -150,6 +161,25 @@ impl QgsBuilder {
     /// Renders the project file content.
     pub fn build(&self) -> String {
         let mut out = TEMPLATE.replace("{{SAVE_DATETIME}}", &time::now_iso8601());
+
+        if let Some(project_srs) = &self.project_srs {
+            let mut w = XmlWriter::new(1);
+            w.start("projectCrs");
+            srs::write_spatialrefsys(&mut w, project_srs);
+            w.end();
+
+            let start = out
+                .find("\n  <projectCrs>")
+                .expect("the template has a <projectCrs> element");
+            let end_tag = "</projectCrs>";
+            let end = out[start..]
+                .find(end_tag)
+                .expect("the template closes <projectCrs>")
+                + start
+                + end_tag.len();
+            out.replace_range(start..end, &w.finish());
+        }
+
         if self.layers.is_empty() {
             return out;
         }
@@ -260,6 +290,38 @@ mod tests {
         assert!(out.contains("attr=\"SID79\""));
         assert!(out.contains("../tmp/nc.gpkg|layername=nc"));
         assert!(out.contains("type=xyz"));
+    }
+
+    #[test]
+    fn default_project_crs_is_the_template_one() {
+        let out = QgsBuilder::new().build();
+        let block = project_crs_block(&out);
+        assert!(block.contains("<authid>EPSG:3857</authid>"));
+    }
+
+    #[test]
+    fn project_crs_can_be_set() {
+        let mut b = QgsBuilder::new();
+        b.set_project_crs(4267).unwrap();
+        let out = b.build();
+        let block = project_crs_block(&out);
+        assert!(block.contains("<authid>EPSG:4267</authid>"));
+        assert!(block.contains("<description>NAD27</description>"));
+        assert!(!block.contains("3857"));
+    }
+
+    #[test]
+    fn invalid_project_crs_is_an_error() {
+        assert!(matches!(
+            QgsBuilder::new().set_project_crs(-1),
+            Err(SrsError::UnknownEpsgCode(-1))
+        ));
+    }
+
+    fn project_crs_block(out: &str) -> &str {
+        let start = out.find("<projectCrs>").expect("has <projectCrs>");
+        let end = out.find("</projectCrs>").expect("has </projectCrs>");
+        &out[start..end]
     }
 
     #[test]

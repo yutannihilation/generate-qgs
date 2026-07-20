@@ -66,6 +66,11 @@ SEXP savvy_QgsBuilder_new__impl(void) {
     return handle_result(res);
 }
 
+SEXP savvy_QgsBuilder_set_project_crs__impl(SEXP self__, SEXP c_arg__srs) {
+    SEXP res = savvy_QgsBuilder_set_project_crs__ffi(self__, c_arg__srs);
+    return handle_result(res);
+}
+
 SEXP savvy_QgsBuilder_write_to__impl(SEXP self__, SEXP c_arg__path) {
     SEXP res = savvy_QgsBuilder_write_to__ffi(self__, c_arg__path);
     return handle_result(res);
@@ -115,6 +120,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"savvy_QgsBuilder_add_xyz_tile_layer__impl", (DL_FUNC) &savvy_QgsBuilder_add_xyz_tile_layer__impl, 5},
     {"savvy_QgsBuilder_build__impl", (DL_FUNC) &savvy_QgsBuilder_build__impl, 1},
     {"savvy_QgsBuilder_new__impl", (DL_FUNC) &savvy_QgsBuilder_new__impl, 0},
+    {"savvy_QgsBuilder_set_project_crs__impl", (DL_FUNC) &savvy_QgsBuilder_set_project_crs__impl, 2},
     {"savvy_QgsBuilder_write_to__impl", (DL_FUNC) &savvy_QgsBuilder_write_to__impl, 2},
     {"savvy_RasterStyle_multiband__impl", (DL_FUNC) &savvy_RasterStyle_multiband__impl, 9},
     {"savvy_RasterStyle_pseudocolor__impl", (DL_FUNC) &savvy_RasterStyle_pseudocolor__impl, 7},

@@ -133,6 +133,12 @@ class(`GeometryType`) <- c("ggplot2qgis::GeometryType__bundle", "savvy_ggplot2qg
   }
 }
 
+`QgsBuilder_set_project_crs` <- function(self) {
+  function(`srs`) {
+    invisible(.Call(savvy_QgsBuilder_set_project_crs__impl, `self`, `srs`))
+  }
+}
+
 `QgsBuilder_write_to` <- function(self) {
   function(`path`) {
     invisible(.Call(savvy_QgsBuilder_write_to__impl, `self`, `path`))
@@ -146,6 +152,7 @@ class(`GeometryType`) <- c("ggplot2qgis::GeometryType__bundle", "savvy_ggplot2qg
   e$`add_vector_layer` <- `QgsBuilder_add_vector_layer`(ptr)
   e$`add_xyz_tile_layer` <- `QgsBuilder_add_xyz_tile_layer`(ptr)
   e$`build` <- `QgsBuilder_build`(ptr)
+  e$`set_project_crs` <- `QgsBuilder_set_project_crs`(ptr)
   e$`write_to` <- `QgsBuilder_write_to`(ptr)
 
   class(e) <- c("ggplot2qgis::QgsBuilder", "QgsBuilder", "savvy_ggplot2qgis__sealed")

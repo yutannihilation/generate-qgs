@@ -4,6 +4,7 @@ SEXP savvy_QgsBuilder_add_vector_layer__ffi(SEXP self__, SEXP c_arg__path, SEXP 
 SEXP savvy_QgsBuilder_add_xyz_tile_layer__ffi(SEXP self__, SEXP c_arg__name, SEXP c_arg__url, SEXP c_arg__zmin, SEXP c_arg__zmax);
 SEXP savvy_QgsBuilder_build__ffi(SEXP self__);
 SEXP savvy_QgsBuilder_new__ffi(void);
+SEXP savvy_QgsBuilder_set_project_crs__ffi(SEXP self__, SEXP c_arg__srs);
 SEXP savvy_QgsBuilder_write_to__ffi(SEXP self__, SEXP c_arg__path);
 
 // methods and associated functions for RasterStyle
