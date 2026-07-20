@@ -14,13 +14,7 @@ fn builder(style: VectorStyle) -> Result<QgsBuilder, generate_qgs::SrsError> {
         18,
     );
     // The sample `nc.gpkg` dataset is in NAD27 (EPSG:4267).
-    b.add_vector_layer(
-        "../tmp/nc.gpkg",
-        "nc",
-        4267,
-        GeometryType::Polygon,
-        style,
-    )?;
+    b.add_vector_layer("../tmp/nc.gpkg", "nc", 4267, GeometryType::Polygon, style)?;
     Ok(b)
 }
 

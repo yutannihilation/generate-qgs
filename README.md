@@ -1,14 +1,7 @@
-Generate .qgs XML file
-======================
+Generate QGIS project (`.qgs`) files programmatically
+=====================================================
 
-A quick-and-dirty Rust crate for generating QGIS project (`.qgs`) files
-programmatically. See `docs/qgs-and-qgz.md` for notes on the file format.
-
-Supported layers: XYZ tiles, GeoPackage vector layers and GeoTIFF raster
-layers. The data files are never read; everything QGIS needs to know
-about them (SRS, styles, band statistics, ...) is passed explicitly, and
-anything QGIS can recompute on load (extent, metadata boilerplate) is
-omitted from the generated project.
+A Rust crate for generating QGIS project (`.qgs`) files programmatically.
 
 ## Usage
 

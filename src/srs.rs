@@ -142,13 +142,15 @@ fn is_geographic(crs: &epsg_utils::Crs) -> bool {
 }
 
 /// Writes a `<spatialrefsys nativeFormat="Wkt">...</spatialrefsys>` block.
-pub(crate) fn write_spatialrefsys<'a>(w: &'a mut XmlWriter, srs: &ResolvedSrs) -> &'a mut XmlWriter {
+pub(crate) fn write_spatialrefsys<'a>(
+    w: &'a mut XmlWriter,
+    srs: &ResolvedSrs,
+) -> &'a mut XmlWriter {
     let (srid, authid) = match srs.epsg {
         Some(code) => (code.to_string(), format!("EPSG:{code}")),
         None => ("0".to_string(), String::new()),
     };
-    w.start("spatialrefsys")
-        .attr("nativeFormat", "Wkt");
+    w.start("spatialrefsys").attr("nativeFormat", "Wkt");
     w.elem("wkt", &srs.wkt);
     // `srsid` is QGIS's internal database id; it is re-resolved on load, so
     // the SRID itself is a good enough placeholder.

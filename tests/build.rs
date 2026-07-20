@@ -124,7 +124,12 @@ fn raster_project_is_well_formed() {
 #[test]
 fn layer_ids_are_consistent_across_sections() {
     let mut b = QgsBuilder::new();
-    b.add_xyz_tile_layer("osm", "https://tile.openstreetmap.org/{z}/{x}/{y}.png", 0, 19);
+    b.add_xyz_tile_layer(
+        "osm",
+        "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+        0,
+        19,
+    );
     let out = b.build();
 
     // The single generated layer id must appear in the tree, the legend,

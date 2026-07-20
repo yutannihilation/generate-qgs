@@ -221,13 +221,14 @@ impl RasterStyle {
     /// Continuous pseudocolor of band 1 with `classes` equally spaced ramp
     /// entries between `min` and `max` (like `samples/elevation.qgs`).
     /// `color_stops` follows the same rules as [`VectorStyle::graduated`].
-    pub fn pseudocolor(
-        classes: usize,
-        min: f64,
-        max: f64,
-        color_stops: &[(f64, Rgb)],
-    ) -> Self {
-        Self::pseudocolor_with_mode(PseudocolorMode::Interpolated, classes, min, max, color_stops)
+    pub fn pseudocolor(classes: usize, min: f64, max: f64, color_stops: &[(f64, Rgb)]) -> Self {
+        Self::pseudocolor_with_mode(
+            PseudocolorMode::Interpolated,
+            classes,
+            min,
+            max,
+            color_stops,
+        )
     }
 
     /// Discrete pseudocolor of band 1 with `classes` equal-interval classes
@@ -278,11 +279,7 @@ impl RasterStyle {
 
     /// True-color rendering of three bands (like `samples/true-color.qgs`).
     /// Each channel is `(band, min, max)`; see [`MultibandColorStyle`].
-    pub fn multiband(
-        red: (u32, f64, f64),
-        green: (u32, f64, f64),
-        blue: (u32, f64, f64),
-    ) -> Self {
+    pub fn multiband(red: (u32, f64, f64), green: (u32, f64, f64), blue: (u32, f64, f64)) -> Self {
         for (band, min, max) in [red, green, blue] {
             assert!(band >= 1, "band numbers are 1-based");
             assert!(min <= max, "multiband style needs min <= max");
@@ -382,11 +379,18 @@ impl VectorStyle {
 fn write_data_defined_properties(w: &mut XmlWriter, tag: &str) {
     w.start(tag);
     w.start("Option").attr("type", "Map");
-    w.empty("Option", &[("name", "name"), ("type", "QString"), ("value", "")]);
+    w.empty(
+        "Option",
+        &[("name", "name"), ("type", "QString"), ("value", "")],
+    );
     w.empty("Option", &[("name", "properties")]);
     w.empty(
         "Option",
-        &[("name", "type"), ("type", "QString"), ("value", "collection")],
+        &[
+            ("name", "type"),
+            ("type", "QString"),
+            ("value", "collection"),
+        ],
     );
     w.end(); // Option
     w.end(); // tag
@@ -429,7 +433,12 @@ fn g6(v: f64) -> String {
         let (mantissa, exponent) = s.split_once('e').unwrap();
         let mantissa = mantissa.trim_end_matches('0').trim_end_matches('.');
         let e: i32 = exponent.parse().unwrap();
-        return format!("{}e{}{:02}", mantissa, if e < 0 { '-' } else { '+' }, e.abs());
+        return format!(
+            "{}e{}{:02}",
+            mantissa,
+            if e < 0 { '-' } else { '+' },
+            e.abs()
+        );
     }
     let decimals = (5 - exp).max(0) as usize;
     format!("{v:.decimals$}")
@@ -764,7 +773,9 @@ pub(crate) fn write_renderer(w: &mut XmlWriter, geom: GeometryType, style: &Vect
             // The colorramp is only informational for a categorized
             // renderer (used when re-classifying); derive it from the
             // first/last category color.
-            let last_color = c.catch_all.unwrap_or(c.categories[c.categories.len() - 1].1);
+            let last_color = c
+                .catch_all
+                .unwrap_or(c.categories[c.categories.len() - 1].1);
             write_gradient_colorramp(w, c.categories[0].1, last_color, &[]);
             w.empty("rotation", &[]);
             w.empty("sizescale", &[]);
@@ -800,19 +811,42 @@ fn write_ramp_legend_settings(w: &mut XmlWriter) {
         .attr("useContinuousLegend", "1");
     w.start("numericFormat").attr("id", "basic");
     w.start("Option").attr("type", "Map");
-    w.empty("Option", &[("name", "decimal_separator"), ("type", "invalid")]);
-    w.empty("Option", &[("name", "decimals"), ("type", "int"), ("value", "6")]);
-    w.empty("Option", &[("name", "rounding_type"), ("type", "int"), ("value", "0")]);
-    w.empty("Option", &[("name", "show_plus"), ("type", "bool"), ("value", "false")]);
     w.empty(
         "Option",
-        &[("name", "show_thousand_separator"), ("type", "bool"), ("value", "true")],
+        &[("name", "decimal_separator"), ("type", "invalid")],
     );
     w.empty(
         "Option",
-        &[("name", "show_trailing_zeros"), ("type", "bool"), ("value", "false")],
+        &[("name", "decimals"), ("type", "int"), ("value", "6")],
     );
-    w.empty("Option", &[("name", "thousand_separator"), ("type", "invalid")]);
+    w.empty(
+        "Option",
+        &[("name", "rounding_type"), ("type", "int"), ("value", "0")],
+    );
+    w.empty(
+        "Option",
+        &[("name", "show_plus"), ("type", "bool"), ("value", "false")],
+    );
+    w.empty(
+        "Option",
+        &[
+            ("name", "show_thousand_separator"),
+            ("type", "bool"),
+            ("value", "true"),
+        ],
+    );
+    w.empty(
+        "Option",
+        &[
+            ("name", "show_trailing_zeros"),
+            ("type", "bool"),
+            ("value", "false"),
+        ],
+    );
+    w.empty(
+        "Option",
+        &[("name", "thousand_separator"), ("type", "invalid")],
+    );
     w.end(); // Option
     w.end(); // numericFormat
     w.end(); // rampLegendSettings
@@ -1027,17 +1061,17 @@ mod tests {
         assert!(out.contains("type=\"categorizedSymbol\""));
         assert!(out.contains("attr=\"NAME\""));
         // Categories reference symbols by index...
-        assert!(out.contains(
-            "<category label=\"Alamance\" render=\"true\" symbol=\"0\" type=\"string\""
-        ));
+        assert!(
+            out.contains(
+                "<category label=\"Alamance\" render=\"true\" symbol=\"0\" type=\"string\""
+            )
+        );
         assert!(out.contains("value=\"Alamance\""));
         assert!(out.contains(
             "<category label=\"Alexander\" render=\"true\" symbol=\"1\" type=\"string\""
         ));
         // ...and the catch-all is a NULL category with the next index.
-        assert!(out.contains(
-            "<category label=\"\" render=\"true\" symbol=\"2\" type=\"NULL\""
-        ));
+        assert!(out.contains("<category label=\"\" render=\"true\" symbol=\"2\" type=\"NULL\""));
         assert!(out.contains("value=\"NULL\""));
         // Symbols are named with the same ids, colors included.
         assert!(out.contains("name=\"0\" type=\"fill\""));

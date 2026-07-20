@@ -155,8 +155,7 @@ mod tests {
     #[test]
     fn nested_elements() {
         let mut w = XmlWriter::new(0);
-        w.start("a")
-            .attr("x", "1");
+        w.start("a").attr("x", "1");
         w.elem("b", "hello");
         w.empty("c", &[("y", "2")]);
         w.end();
@@ -169,9 +168,7 @@ mod tests {
     #[test]
     fn escaping() {
         let mut w = XmlWriter::new(0);
-        w.start("a")
-            .attr("k", "v&<>\"")
-            .text("t&<>");
+        w.start("a").attr("k", "v&<>\"").text("t&<>");
         w.end();
         assert_eq!(
             w.finish(),

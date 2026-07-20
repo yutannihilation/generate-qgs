@@ -2,7 +2,7 @@
 //!
 //! Quick-and-dirty generator: the static boilerplate of a project (taken
 //! from an empty project saved by QGIS) is used as a template, and only the
-//! layer-related parts are generated. See `docs/qgs-and-qgz.md` for the
+//! layer-related parts are generated. See `docs/qgs-format.md` for the
 //! findings about the file format.
 //!
 //! # Example
@@ -42,8 +42,8 @@ use std::path::Path;
 
 pub use srs::{Srs, SrsError};
 pub use style::{
-    GeometryType, GraduatedStyle, MultibandColorStyle, PseudocolorMode, PseudocolorStyle, Rgb,
-    RasterStyle, SimpleStyle, VectorStyle,
+    GeometryType, GraduatedStyle, MultibandColorStyle, PseudocolorMode, PseudocolorStyle,
+    RasterStyle, Rgb, SimpleStyle, VectorStyle,
 };
 
 use layers::{Layer, RasterLayer, VectorLayer, XyzLayer};
@@ -191,7 +191,10 @@ impl QgsBuilder {
         );
         out = out.replace(
             "\n  <projectlayers/>",
-            &format!("\n  <projectlayers>{}\n  </projectlayers>", projectlayers.finish()),
+            &format!(
+                "\n  <projectlayers>{}\n  </projectlayers>",
+                projectlayers.finish()
+            ),
         );
         out = out.replace(
             "\n  <layerorder/>",

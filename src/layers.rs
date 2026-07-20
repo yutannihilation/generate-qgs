@@ -1,7 +1,7 @@
 //! Layer definitions and their XML representation.
 //!
 //! Each layer is referenced from four places in the project file
-//! (see `docs/qgs-and-qgz.md`); this module renders all of them.
+//! (see `docs/qgs-format.md`); this module renders all of them.
 
 use crate::srs::{ResolvedSrs, write_spatialrefsys};
 use crate::style::{
@@ -254,7 +254,12 @@ fn write_xyz_maplayer(w: &mut XmlWriter, layer: &XyzLayer) {
     write_extent(
         w,
         "wgs84extent",
-        ["-180", "-85.05112877980660357", "180", "85.05112877980660357"],
+        [
+            "-180",
+            "-85.05112877980660357",
+            "180",
+            "85.05112877980660357",
+        ],
     );
     w.elem("id", &layer.id);
     w.elem("datasource", &layer.datasource());
@@ -370,7 +375,10 @@ fn write_vector_maplayer(w: &mut XmlWriter, layer: &VectorLayer) {
     w.start("srs");
     write_spatialrefsys(w, &layer.srs);
     w.end(); // srs
-    w.start("provider").attr("encoding", "UTF-8").text("ogr").end();
+    w.start("provider")
+        .attr("encoding", "UTF-8")
+        .text("ogr")
+        .end();
     w.empty("vectorjoins", &[]);
     w.empty("layerDependencies", &[]);
     w.empty("dataDependencies", &[]);
@@ -394,7 +402,10 @@ fn write_vector_maplayer(w: &mut XmlWriter, layer: &VectorLayer) {
     w.end(); // activeChecks
     w.empty("checkConfiguration", &[]);
     w.end(); // geometryOptions
-    w.empty("legend", &[("showLabelLegend", "0"), ("type", "default-vector")]);
+    w.empty(
+        "legend",
+        &[("showLabelLegend", "0"), ("type", "default-vector")],
+    );
     w.empty("referencedLayers", &[]);
     w.empty("referencingLayers", &[]);
     w.end(); // maplayer
