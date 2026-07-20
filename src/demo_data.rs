@@ -2,6 +2,16 @@
 
 use generate_qgs::Rgb;
 
+/// The "Spectral" color ramp of the elevation samples
+/// (samples/elevation.qgs, samples/elevation_discrete.qgs).
+pub(crate) const SPECTRAL_RAMP: &[(f64, Rgb)] = &[
+    (0.0, Rgb::new(215, 25, 28)),
+    (0.25, Rgb::new(253, 174, 97)),
+    (0.5, Rgb::new(255, 255, 191)),
+    (0.75, Rgb::new(171, 221, 164)),
+    (1.0, Rgb::new(43, 131, 186)),
+];
+
 /// The magma color ramp: 52 control points extracted from samples/magma.qgs.
 pub(crate) const MAGMA_RAMP: &[(f64, Rgb)] = &[
     (0.0, Rgb::new(0, 0, 4)),

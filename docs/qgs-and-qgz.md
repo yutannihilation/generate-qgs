@@ -1,8 +1,12 @@
 Understanding `.qgs` and `.qgz` file format
 ===========================================
 
-Findings from comparing the three sample projects (`samples/blank.qgs`,
-`samples/load.qgs`, `samples/red.qgs`), all saved by QGIS 4.2.0.
+Findings from comparing the sample projects in `samples/`, all saved by
+QGIS 4.2.0: `blank.qgs`, `load.qgs`, `red.qgs`, `magma.qgs` and
+`categorized.qgs` cover vector layers (plus one XYZ tile layer each);
+`elevation.qgs`, `elevation_discrete.qgs` and `true-color.qgs` cover
+raster layers loaded from local GeoTIFF files (`volcano2.tif`,
+`cyl_tile.tif`).
 
 ## `.qgs` vs `.qgz`
 
@@ -21,7 +25,7 @@ Findings from comparing the three sample projects (`samples/blank.qgs`,
   <layer-tree-group> ... layer tree entries ... </layer-tree-group>
   ...
   <projectlayers>
-    <maplayer type="raster"> ... </maplayer>   <!-- XYZ tile layer -->
+    <maplayer type="raster"> ... </maplayer>   <!-- XYZ tiles or a local raster file (e.g. .tif) -->
     <maplayer type="vector"> ... </maplayer>   <!-- .gpkg layer -->
   </projectlayers>
   <layerorder> ... </layerorder>
@@ -43,7 +47,7 @@ id starts with `_`.
 
 | Node | Role |
 | --- | --- |
-| `<layer-tree-group>/<layer-tree-layer>` | Entry in the Layers panel. `providerKey` (`ogr`/`wms`), `source` (same as `<datasource>`). Top-most layer comes first. |
+| `<layer-tree-group>/<layer-tree-layer>` | Entry in the Layers panel. `providerKey` (`ogr`/`wms`/`gdal`), `source` (same as `<datasource>`). Top-most layer comes first. |
 | `<layer-tree-group>/<custom-order>/<item>` | Layer id list, bottom-most first. |
 | `<legend>/<legendlayer>/<filegroup>/<legendlayerfile>` | Legend entries (same order as the layer tree). |
 | `<projectlayers>/<maplayer>` | The actual layer definition: data source, CRS, renderer (style). |
@@ -60,6 +64,79 @@ id starts with `_`.
   (`±20037508.342789...`); `<wgs84extent>` is `±180`, `±85.0511287798066`.
 - `<pipe>/<rasterrenderer type="singlebandcolordata">` is the standard
   renderer for XYZ tiles.
+
+### Raster layer from a local file (`<maplayer type="raster" layerType="Raster">`)
+
+Findings from `samples/elevation.qgs` and `samples/elevation_discrete.qgs`
+(both reference `volcano2.tif`: 122×174, single Float32 band, data range
+76.26–195.55) and `samples/true-color.qgs` (references `cyl_tile.tif`:
+261×212, three Byte bands).
+
+- `<provider>gdal</provider>` — local raster files go through the GDAL
+  provider (unlike `ogr`, no `encoding` attribute); `providerKey="gdal"`
+  in the layer tree.
+- `<datasource>` is the plain file path. A relative path is resolved
+  against the project file location, same as for vector layers.
+- `<extent>` / `<wgs84extent>` are the raster's own extent (in the layer
+  CRS and in EPSG:4326), not whole-world like XYZ tiles. Like for vector
+  layers, the crate omits them and lets QGIS recompute them from the data
+  source. `<srs>` is the layer CRS, same structure as vector layers.
+- `<noData>` holds one `<noDataList bandNo="N" useSrcNoData="1"/>` per
+  band (the XYZ sample has a single entry with `useSrcNoData="0"`).
+- `<pipe>` has the same skeleton as the XYZ layer
+  (`<provider><resampling .../>`, then after the renderer
+  `<brightnesscontrast>`, `<huesaturation>`, `<rasterresampler>`,
+  `<resamplingStage>`); only `<rasterrenderer>` differs. Common renderer
+  attributes: `alphaBand="-1"`, `nodataColor=""`, `opacity="1"`.
+- `<blendMode>0</blendMode>` and an empty `<legend/>` close the maplayer.
+- Boilerplate the samples carry but QGIS regenerates on load, so a
+  generator can omit it (the crate already omits the vector-layer
+  counterparts): `<resourceMetadata>`, `<temporal>`, `<elevation>`
+  (profile symbols with random UUIDs/colors), `<customproperties>`,
+  `<mapTip>`, `<pipe-data-defined-properties>`,
+  `<map-layer-style-manager>`.
+
+#### Single-band pseudocolor (`<rasterrenderer type="singlebandpseudocolor">`)
+
+Colors one band (attribute `band`, 1-based) through a color ramp between
+`classificationMin` / `classificationMax` (80/200 in the samples, chosen
+by the user — the data spans 76.26–195.55; `<minMaxOrigin>/<limits>` is
+`None`, i.e. the values are not derived from band statistics). The ramp
+lives in `<rastershader>/<colorrampshader>`:
+
+- `minimumValue` / `maximumValue` duplicate classificationMin/Max;
+  `clip="0"`, `labelPrecision="0"`.
+- `<colorramp name="[source]" type="gradient">` has exactly the same
+  format as the vector graduated renderer's ramp (`color1`/`color2` and
+  optional `stops`).
+- Two modes, selected by the `colorRampType` attribute:
+  - `INTERPOLATED` (continuous; `classificationMode="1"`): *n* `<item>`s
+    at evenly spaced values `min + i·(max−min)/(n−1)` — the sample has 5
+    items: 80, 110, 140, 170, 200. Each item's color is the ramp sampled
+    at `i/(n−1)`, the same rule as the vector graduated renderer. The
+    label is the value itself.
+  - `DISCRETE` (`classificationMode="2"`, equal interval): *n* `<item>`s
+    whose `value` is the class upper bound `min + (i+1)·(max−min)/n`,
+    except the last one which is `inf` — the sample has 10 classes: 92,
+    104, ..., 188, inf. Labels are `<= v0` for the first class
+    (XML-escaped as `&lt;=`), `v(i−1) - vi` for the middle ones and
+    `> v(n−2)` for the open-ended last class. Colors are again the ramp
+    sampled at `i/(n−1)`.
+- `<item>` values are formatted `%g`-style (no trailing decimals for
+  integers); colors are hex `#rrggbb` with `alpha="255"`.
+- `<rampLegendSettings>` (with a `<numericFormat id="basic">` child) is
+  static legend boilerplate, byte-identical in both samples.
+
+#### Multiband color, a.k.a. true color (`<rasterrenderer type="multibandcolor">`)
+
+Maps bands to RGB channels via `redBand` / `greenBand` / `blueBand`
+(1-based; 1/2/3 in the sample). `<minMaxOrigin>/<limits>` is `MinMax`
+and each channel carries a `<redContrastEnhancement>` /
+`<greenContrastEnhancement>` / `<blueContrastEnhancement>` element whose
+`<minValue>` / `<maxValue>` are the band statistics (35/253, 35/251,
+35/250 — the actual min/max of the three Byte bands) with
+`<algorithm>NoEnhancement</algorithm>`, i.e. channel values are used
+as-is. There is no `<rastershader>`.
 
 ### Vector layer (`<maplayer type="vector" layerType="Vector">`)
 
@@ -79,7 +156,11 @@ id starts with `_`.
   - `type="singleSymbol"`: one `<symbol type="fill">` with a `SimpleFill`
     layer; the fill color is in
     `<Option name="color" value="R,G,B,255,rgb:r,g,b,1"/>` (both integer
-    0-255 and float 0-1 forms in one string).
+    0-255 and float 0-1 forms in one string; the floats are `%.7f` of the
+    32-bit channel value with trailing zeros stripped — e.g. 174/255 is
+    `0.682353`, not `0.6823529` — verified against every channel value in
+    the samples). Note QGIS also escapes only `&`, `<` and `"` in
+    attribute values; `>` is written verbatim (e.g. `label="> 188"`).
   - `type="graduatedSymbol"` with `attr="<field>"` and
     `graduatedMethod="GraduatedColor"`: `<ranges>` list `lower`/`upper`
     bounds (15 decimal digits) referencing symbols by index; `<symbols>`
@@ -134,6 +215,10 @@ the template:
   empty `<transformContext/>`; QGIS recomputes it.
 - `<elevation>` / `<temporal>` inside `<maplayer>`: 3D/elevation profile and
   temporal controller settings. Omitted; QGIS fills defaults.
+- `<map-layer-style-manager>`: named snapshots of the layer style (the
+  default name is locale-dependent — "デフォルト" in a Japanese locale).
+  Present in every sample layer, vector and raster alike; the crate omits
+  it and QGIS recreates it on load.
 - `iccProfileId` / `projectStyleId` (`attachment:///...`): references into
   the `.qgd` auxiliary database. Left empty.
 - `<saveDateTime>`-style metadata, `<ProjectGpsSettings destinationLayer...>`:
@@ -142,6 +227,13 @@ the template:
   `<range uuid="{...}">`: only need to be unique within the document.
 
 ## Generation strategy (this crate)
+
+Supported data sources: GeoPackage for vector layers (ogr provider),
+GeoTIFF for raster layers (gdal provider) and XYZ tiles (wms provider).
+The data files are never read — everything QGIS needs is passed to the
+API explicitly (SRS, styles, band statistics), and everything QGIS
+recomputes on load (extents, `<resourceMetadata>`, `<temporal>`,
+`<elevation>`, `<map-layer-style-manager>`, ...) is omitted.
 
 1. Take `blank.qgs` (cleaned of user/session-specific values, `<proj4>`
    removed) as the static template.
